@@ -1,0 +1,9 @@
+[package]
+name = "zx"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+sdl2 = { version = "0.38.0", features = ["ttf"] }
+zilog_z80 = "0.17.0"
+video = "0.1.1"
