@@ -44,10 +44,10 @@ fn main() -> Result<(), String> {
     let mut last_snapshot = None;
 
     let mut debugger = Debugger::new();
-    let mut tstates: u64 = 0;
+    // let mut tstates: u64 = 0;
     let mut stack_tracker = StackTracker::new(512);
 
-    let mut next_interrupt: u64 = TSTATES_PER_FRAME;
+    //let mut next_interrupt: u64 = TSTATES_PER_FRAME;
 
     // PANTALLA ZX (buffer lógico)
     let mut pantalla = Video::new(ESCALA_VENTANA_ZX);
@@ -129,7 +129,9 @@ fn main() -> Result<(), String> {
                                         &mut unimpl_tracker,
                                         &mut stack_tracker,
                                     );
-                                    tstates += snap.instr_cycles as u64;
+                                    // la interrupción ya fue consumida
+                                    interrupt_pending = false;
+                                    //tstates += snap.instr_cycles as u64;
                                     last_snapshot = Some(snap);
                                 }
                                 ButtonAction::Run => debugger.run(),
@@ -155,13 +157,24 @@ fn main() -> Result<(), String> {
                     &mut unimpl_tracker,
                     &mut stack_tracker,
                 );
-                tstates += snap.instr_cycles as u64;
+                /*tstates += snap.instr_cycles as u64;
                 if tstates >= next_interrupt {
                     //cpu.interrupt();      // IM 1 → vector $0038
                     cpu.int_request(0xFF); // IM 1 → vector $0038
                     next_interrupt += TSTATES_PER_FRAME;
                     pantalla.on_vsync();     // ← lo usaremos para FLASH
+                }*/
+
+                // ¿toca interrupción?
+                if run_state.t_states >= next_interrupt {
+                    interrupt_pending = true;
+                    next_interrupt += TSTATES_PER_FRAME;
+
+                    // sincronización de vídeo (50 Hz)
+                    pantalla.on_vsync();
                 }
+
+                interrupt_pending = false;
 
                 last_snapshot = Some(snap);
 
@@ -186,14 +199,23 @@ fn main() -> Result<(), String> {
                         &mut unimpl_tracker,
                         &mut stack_tracker,
                     );
-                    tstates += snap.instr_cycles as u64;
+                    /*tstates += snap.instr_cycles as u64;
                     if tstates >= next_interrupt {
                         cpu.int_request(0xFF); // Interrupcción IM 1 → vector $0038
 
                         next_interrupt += TSTATES_PER_FRAME;
                         pantalla.on_vsync();     // ← FLASH
+                    }*/
+                    // ¿toca interrupción?
+                    if run_state.t_states >= next_interrupt {
+                        interrupt_pending = true;
+                        next_interrupt += TSTATES_PER_FRAME;
+
+                        // sincronización de vídeo (50 Hz)
+                        pantalla.on_vsync();
                     }
 
+                    interrupt_pending = false;
                     last_snapshot = Some(snap);
                     if debugger.mode != RunMode::RunFast {
                         break;
@@ -203,11 +225,11 @@ fn main() -> Result<(), String> {
             _ => {}
         }
 
-        // ---------------- INTERRUPCION ----------------
+        /*// ---------------- INTERRUPCION ----------------
         if run_state.t_states >= next_interrupt {
             interrupt_pending = true;
             next_interrupt += TSTATES_PER_FRAME;
-        }
+        }*/
 
         // ---------------- VIDEO UPDATE ----------------
         pantalla.update_from_bus(&cpu.bus);
