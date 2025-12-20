@@ -54,16 +54,20 @@ pub struct CpuSnapshot {
  * ESTADO DE LA CPU
  * ================================================== */
 pub struct CpuRunState {
-    pub halted: bool,    // Interrupciones
-    pub iff1: bool,      // Interrupciones habilitadas
-    pub im: u8,          // Modo de interrupción (0,1,2)
+    pub halted: bool,       // Interrupciones
+    pub iff1: bool,         // Interrupciones habilitadas
+    pub iff1_pending: bool, // para ejecutar en la siguiente instrucción
+    pub iff1_delay: u8,     // para modificar iff1  mas tarde
+    pub im: u8,             // Modo de interrupción (0,1,2)
     pub t_states: u64,
 }
 impl CpuRunState {
     pub fn new() -> Self {
         Self {
             halted: false,
-            iff1: true,   // en Spectrum tras ROM: habilitadas
+            iff1: false,   // en Spectrum tras ROM: habilitadas
+            iff1_pending: false,
+            iff1_delay: 0,
             im: 1,        // Spectrum usa IM 1
             t_states: 0,
         }
@@ -118,16 +122,41 @@ pub fn step(
     unimpl: &mut UnimplTracker,
     stack_tracker: &mut StackTracker,
 ) -> CpuSnapshot {
+    //dbg!(cpu.reg.pc);
+
     // -----------------------------------------------
     // Estado previo
     // -----------------------------------------------
     let pc_before = cpu.reg.pc;
     let sp_before = cpu.reg.sp;
 
+    /*if interrupt_pending {
+        println!(
+            "INT pendiente: PC={:04X} iff1={}",
+            cpu.reg.pc,
+            run_state.iff1
+        );
+    }*/
+
+    if interrupt_pending && run_state.iff1 {
+        if cpu.reg.pc == 0x0038 {
+            dbg!("EJECUTANDO 0038");
+        }
+    }
+
+    // -----------------------------------------------
+    // Activación diferida de EI (Z80 REAL)
+    // -----------------------------------------------
+    if run_state.iff1_pending {
+        run_state.iff1 = true;
+        run_state.iff1_pending = false;
+    }
+
     // ------------------------------------------------
     // INTERRUPCIÓN (IM 1)    Tiene PRIORIDAD ABSOLUTA
     // ------------------------------------------------
-    if interrupt_pending && run_state.iff1 {
+    /*if interrupt_pending && run_state.iff1 {
+        //dbg!(("INT", cpu.reg.pc));
         // Si estaba en HALT, despertamos
         run_state.halted = false;
 
@@ -145,8 +174,12 @@ pub fn step(
                 cpu.bus.write_byte(sp, (pc & 0x00FF) as u8);
                 cpu.bus.write_byte(sp.wrapping_add(1), (pc >> 8) as u8);
 
+                println!("IM1 -> ANTES de entrar en 0038 desde {:04X}", pc);
+
                 // Saltar a 0038h
                 cpu.reg.pc = 0x0038;
+
+                println!("IM1 -> DESPUES de entrar en 0038 desde {:04X}", pc);
 
                 // Coste real: ~13 T-states
                 return snapshot(cpu, pc, 0, 13);
@@ -161,9 +194,12 @@ pub fn step(
     // SI LA CPU ESTÁ EN HALT
     // -----------------------------------------------
     if run_state.halted {
-        // El Z80 consume 4 T-states por ciclo
+        dbg!("CPU EN HALT");
+        // El Z80 sigue consumiendo tiempo en HALT
+        run_state.t_states += 4;
+
         return snapshot(cpu, pc_before, 0, 4);
-    }
+    }*/
 
     // -----------------------------------------------
     // Leer hasta 4 bytes de instrucción
@@ -190,6 +226,34 @@ pub fn step(
     // Ejecutar instrucción
     // -----------------------------------------------
     let instr_cycles = cpu.execute();
+    //let cursor = cpu.bus.read_byte(0x5C5C);
+    //dbg!(cursor);
+    /// -----------------------------------------------
+    // RETI / RETN restauran interrupciones (Z80 REAL)
+    // -----------------------------------------------
+    if opcode == 0xED {
+        let next = cpu.bus.read_byte(pc_before.wrapping_add(1));
+        if next == 0x4D || next == 0x45 {
+            run_state.iff1 = true;
+        }
+    }
+
+    // -----------------------------------------------
+    // EI / DI (Z80 REAL)
+    // -----------------------------------------------
+    match opcode {
+        0xFB => {
+            // EI → se activa DESPUÉS de la siguiente instrucción
+            run_state.iff1_pending = true;
+            run_state.iff1_delay = 1;
+        }
+        0xF3 => {
+            // DI → inmediato
+            run_state.iff1 = false;
+            run_state.iff1_pending = false;
+        }
+        _ => {}
+    }
 
     // -----------------------------------------------
     // HALT: entrar en estado detenido

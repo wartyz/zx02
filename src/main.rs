@@ -30,10 +30,12 @@ fn main() -> Result<(), String> {
     // --------------------------------------------------
     // CPU + ESTADO
     // --------------------------------------------------
-    let mut cpu = init_cpu("ROMS/DMG_ROMdeGameBoy.bin");
+    let mut cpu = init_cpu("ROMS/ZXSpectrum48.rom");
     //let mut cpu = init_cpu("tests/z80/video_attr_test.bin");
     //let mut cpu = init_cpu("tests/z80/all_colors_flash.bin");
     //let mut cpu = init_cpu("tests/z80/flash_test.bin");
+    //let mut cpu = init_cpu("tests/z80/pba00.bin");
+    //let mut cpu = init_cpu("tests/z80/pba01.bin");
 
     let mut run_state = CpuRunState::new(); // Estado de la CPU
     let mut interrupt_pending = false;
@@ -44,10 +46,7 @@ fn main() -> Result<(), String> {
     let mut last_snapshot = None;
 
     let mut debugger = Debugger::new();
-    // let mut tstates: u64 = 0;
     let mut stack_tracker = StackTracker::new(512);
-
-    //let mut next_interrupt: u64 = TSTATES_PER_FRAME;
 
     // PANTALLA ZX (buffer lógico)
     let mut pantalla = Video::new(ESCALA_VENTANA_ZX);
@@ -73,19 +72,12 @@ fn main() -> Result<(), String> {
         .build()
         .map_err(|e| e.to_string())?;
 
-    /* // Tamaño lógico fijo
-     debug_canvas
-         .set_logical_size(ANCHO_VENTANA, ALTO_VENTANA)
-         .map_err(|e| e.to_string())?;*/
-
     let font = ttf.load_font("FONTS/DejaVuSansMono.ttf", 16)?;
 
     // ---------------- ZX SCREEN WINDOW ----------------
     let zx_window = video_sub
         .window(
             "ZX Spectrum",
-            //256 * ESCALA_PANTALLA_ZX,
-            //192 * ESCALA_PANTALLA_ZX,
             256 * ESCALA_PANTALLA_ZX,
             192 * ESCALA_PANTALLA_ZX,
         )
@@ -121,6 +113,17 @@ fn main() -> Result<(), String> {
                             match b.action {
                                 ButtonAction::Step => {
                                     debugger.step();
+
+                                    if debugger.check_breakpoint(cpu.reg.pc) {
+                                        last_snapshot = Some(cpu_exec::snapshot(
+                                            &cpu,
+                                            cpu.reg.pc,
+                                            0,
+                                            0,
+                                        ));
+                                        continue;
+                                    }
+
                                     let snap = step(
                                         &mut cpu,
                                         &mut run_state,
@@ -129,9 +132,7 @@ fn main() -> Result<(), String> {
                                         &mut unimpl_tracker,
                                         &mut stack_tracker,
                                     );
-                                    // la interrupción ya fue consumida
-                                    interrupt_pending = false;
-                                    //tstates += snap.instr_cycles as u64;
+
                                     last_snapshot = Some(snap);
                                 }
                                 ButtonAction::Run => debugger.run(),
@@ -149,6 +150,16 @@ fn main() -> Result<(), String> {
         // ---------------- CPU RUN ----------------
         match debugger.mode {
             RunMode::Run => {
+                if debugger.check_breakpoint(cpu.reg.pc) {
+                    last_snapshot = Some(cpu_exec::snapshot(
+                        &cpu,
+                        cpu.reg.pc,
+                        0,
+                        0,
+                    ));
+                    continue;
+                }
+
                 let snap = step(
                     &mut cpu,
                     &mut run_state,
@@ -157,28 +168,19 @@ fn main() -> Result<(), String> {
                     &mut unimpl_tracker,
                     &mut stack_tracker,
                 );
-                /*tstates += snap.instr_cycles as u64;
-                if tstates >= next_interrupt {
-                    //cpu.interrupt();      // IM 1 → vector $0038
-                    cpu.int_request(0xFF); // IM 1 → vector $0038
-                    next_interrupt += TSTATES_PER_FRAME;
-                    pantalla.on_vsync();     // ← lo usaremos para FLASH
-                }*/
 
                 // ¿toca interrupción?
                 if run_state.t_states >= next_interrupt {
-                    interrupt_pending = true;
+                    cpu.int_request(0xFF); // IM 1
                     next_interrupt += TSTATES_PER_FRAME;
 
                     // sincronización de vídeo (50 Hz)
                     pantalla.on_vsync();
                 }
 
-                interrupt_pending = false;
-
                 last_snapshot = Some(snap);
 
-                // ----------------------------------------
+                /*// ----------------------------------------
                 // IM 1: una interrupción cada ~20 ms (50 Hz)
                 // ----------------------------------------
                 unsafe {
@@ -187,10 +189,21 @@ fn main() -> Result<(), String> {
                     if cpu_exec::IM1_COUNT % 32 == 0 {
                         pantalla.flash_phase = !pantalla.flash_phase;
                     }
-                }
+                }*/
             }
             RunMode::RunFast => {
                 for _ in 0..50_000 {
+                    //dbg!(cpu.bus.read_byte(0x5C5C));
+                    if debugger.check_breakpoint(cpu.reg.pc) {
+                        last_snapshot = Some(cpu_exec::snapshot(
+                            &cpu,
+                            cpu.reg.pc,
+                            0,
+                            0,
+                        ));
+                        break;
+                    }
+
                     let snap = step(
                         &mut cpu,
                         &mut run_state,
@@ -199,13 +212,7 @@ fn main() -> Result<(), String> {
                         &mut unimpl_tracker,
                         &mut stack_tracker,
                     );
-                    /*tstates += snap.instr_cycles as u64;
-                    if tstates >= next_interrupt {
-                        cpu.int_request(0xFF); // Interrupcción IM 1 → vector $0038
 
-                        next_interrupt += TSTATES_PER_FRAME;
-                        pantalla.on_vsync();     // ← FLASH
-                    }*/
                     // ¿toca interrupción?
                     if run_state.t_states >= next_interrupt {
                         interrupt_pending = true;
@@ -215,8 +222,8 @@ fn main() -> Result<(), String> {
                         pantalla.on_vsync();
                     }
 
-                    interrupt_pending = false;
                     last_snapshot = Some(snap);
+
                     if debugger.mode != RunMode::RunFast {
                         break;
                     }
@@ -224,12 +231,6 @@ fn main() -> Result<(), String> {
             }
             _ => {}
         }
-
-        /*// ---------------- INTERRUPCION ----------------
-        if run_state.t_states >= next_interrupt {
-            interrupt_pending = true;
-            next_interrupt += TSTATES_PER_FRAME;
-        }*/
 
         // ---------------- VIDEO UPDATE ----------------
         pantalla.update_from_bus(&cpu.bus);

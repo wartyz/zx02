@@ -10,7 +10,8 @@ pub enum RunMode {
  * BREAKPOINT (POR AHORA FIJO)
  * ================================================== */
 
-pub const BREAKPOINT_ADDR: u16 = 0x8000;
+//pub const BREAKPOINT_ADDR: u16 = 0x0038;
+pub const BREAKPOINT_ADDR: u16 = 0xFFFF; // sin Breakpoint
 
 /* ==================================================
  * DEBUGGER
