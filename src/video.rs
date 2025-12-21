@@ -68,7 +68,7 @@ impl Video {
     pub fn on_vsync(&mut self) {
         self.flash_counter += 1;
         // El Spectrum real cambia el flash cada 16 o 32 interrupciones
-        if self.flash_counter >= 32 {
+        if self.flash_counter >= 16 {
             self.flash_counter = 0;
             self.flash_phase = !self.flash_phase;
         }

@@ -19,8 +19,10 @@ use botones::ButtonAction;
 use stack_tracker::StackTracker;
 use video::Video;
 use std::collections::HashMap;
+use std::time::{Duration, Instant};
 use crate::bus::ZxBus;
 use crate::cpu_exec::CpuRunState;
+use crate::interrupt::InterruptController;
 
 const TSTATES_PER_FRAME: u64 = 69888;
 const ANCHO_VENTANA: u32 = 3800;
@@ -35,6 +37,7 @@ fn main() -> Result<(), String> {
     // 2. Inicializamos la CPU con la ROM
     let mut cpu = init_cpu("ROMS/ZXSpectrum48.rom");
 
+    let mut int_ctrl = InterruptController::new();
     let mut run_state = CpuRunState::new();
     let mut interrupt_pending = false;
 
@@ -68,9 +71,12 @@ fn main() -> Result<(), String> {
 
     let mut zx_canvas = zx_window.into_canvas().accelerated().present_vsync().build().map_err(|e| e.to_string())?;
     let mut event_pump = sdl.event_pump()?;
+    let frame_duration = Duration::from_micros(20000); // 20ms = 50Hz
 
     // BUCLE PRINCIPAL
     'running: loop {
+        let frame_start = Instant::now();
+
         for event in event_pump.poll_iter() {
             match event {
                 Event::Quit { .. } | Event::KeyDown { keycode: Some(Keycode::Escape), .. } => break 'running,
@@ -135,6 +141,11 @@ fn main() -> Result<(), String> {
                         &mut stack_tracker,
                     );
 
+                    // ⬅️ ACUMULAMOS CICLOS REALES
+                    if int_ctrl.add_cycles(snap.instr_cycles) {
+                        interrupt_pending = true;
+                    }
+
                     // Si la CPU aceptó la interrupción (saltó a 0x0038), bajamos la señal
                     if interrupt_pending && cpu.reg.pc == 0x0038 {
                         interrupt_pending = false;
@@ -145,8 +156,8 @@ fn main() -> Result<(), String> {
                 }
 
                 // Al finalizar el frame, generamos la señal de interrupción para el próximo
-                interrupt_pending = true;
-                run_state.t_states += states_en_este_frame;
+                //interrupt_pending = true;
+                //run_state.t_states += states_en_este_frame;
 
                 // Actualizamos la estructura de video con la RAM actual
                 pantalla.update_from_bus(&cpu.bus);
@@ -167,7 +178,9 @@ fn main() -> Result<(), String> {
                             &mut unimpl_tracker,
                             &mut stack_tracker,
                         );
-
+                        if int_ctrl.add_cycles(snap.instr_cycles) {
+                            interrupt_pending = true;
+                        }
                         if interrupt_pending && cpu.reg.pc == 0x0038 {
                             interrupt_pending = false;
                         }
@@ -175,9 +188,9 @@ fn main() -> Result<(), String> {
                         states_sub_frame += snap.instr_cycles as u64;
                         last_snapshot = Some(snap);
                     }
-                    interrupt_pending = true;
-                    run_state.t_states += states_sub_frame;
+                    pantalla.on_vsync();
                 }
+                //pantalla.on_vsync();
                 pantalla.update_from_bus(&cpu.bus);
             }
 
@@ -187,17 +200,24 @@ fn main() -> Result<(), String> {
 
             _ => {}
         }
+
         // Sincronizar Video y Render
         pantalla.update_from_bus(&cpu.bus);
         gui::draw_debug(&mut debug_canvas, &font, last_snapshot.as_ref(), &stack_tracker)?;
         gui::draw_zx_screen(&mut zx_canvas, &pantalla)?;
 
-        // ¡No olvides presentar los cambios!
+        // Presentar los cambios!
         debug_canvas.present();
         zx_canvas.present();
 
         // Pequeño delay para no consumir el 100% de la CPU del PC
-        std::thread::sleep(std::time::Duration::from_millis(16));
+        //std::thread::sleep(std::time::Duration::from_millis(16));
+
+        // ESPERAR para clavar los 50 FPS
+        let elapsed = frame_start.elapsed();
+        if elapsed < frame_duration {
+            std::thread::sleep(frame_duration - elapsed);
+        }
     }
     Ok(())
 }

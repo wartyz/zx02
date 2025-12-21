@@ -1,9 +1,9 @@
 use crate::teclado::Keyboard;
-use zilog_z80::bus::Bus;
 
 pub struct ZxBus {
     pub mem: Vec<u8>,
     pub keyboard: Keyboard,
+    border: u8,
 }
 
 impl ZxBus {
@@ -11,6 +11,7 @@ impl ZxBus {
         Self {
             mem: vec![0; 65536],
             keyboard: Keyboard::new(),
+            border: 0,
         }
     }
 
@@ -31,53 +32,6 @@ impl ZxBus {
             self.mem[addr as usize] = value;
         }
     }
-
-    /*// -------------------------
-    // ENTRADA DE PUERTOS (IN)
-    // -------------------------
-    pub fn in_port(&self, port: u16) -> u8 {
-        // En el Spectrum, el puerto fundamental es el 0xFE (254)
-        if (port & 0x00FF) == 0xFE {
-            let high = (port >> 8) as u8;
-
-            // IMPORTANTE: Si keyboard.read_port_fe devuelve 0, la ROM se cuelga.
-            // Asegúrate de que devuelva 0xFF si no hay teclas pulsadas.
-            dbg!(self.keyboard.read_port_fe(high));
-            return self.keyboard.read_port_fe(high);
-        }
-        // Bus flotante: por defecto devolvemos 0xFF
-        0xFF
-    }*/
-
-    // -------------------------
-    // ENTRADA DE PUERTOS (IN)
-    // -------------------------
-    // pub fn in_port(&self, port: u16) -> u8 {
-    //     let port_low = (port & 0x00FF) as u8;
-    //
-    //     // El Spectrum decodifica el teclado cuando el bit 0 de la dirección de puerto es 0.
-    //     // Aunque la forma más común es comprobar si es 0xFE.
-    //     if port_low == 0xFE {
-    //         let high = (port >> 8) as u8;
-    //
-    //         // Obtenemos el estado de las semi-filas del teclado
-    //         let mut row_data = self.keyboard.read_port_fe(high);
-    //
-    //         // --- AJUSTES DE COMPATIBILIDAD ---
-    //         // 1. Forzamos los bits 5 y 7 a 1 (no se usan en el teclado estándar)
-    //         // 2. El bit 6 es el puerto EAR (cassette). Lo ponemos en 1 para evitar ruido.
-    //         // Si row_data es p.ej. 0x1F (ninguna tecla), esto lo convierte en 0xBF.
-    //         row_data |= 0b10100000;
-    //
-    //         // Si el bit 6 debe estar alto por defecto (típico para que la ROM no detecte carga):
-    //         row_data |= 0x40;
-    //
-    //         return row_data;
-    //     }
-    //
-    //     // Bus flotante: por defecto devolvemos 0xFF (no hay nada en ese puerto)
-    //     0xFF
-    // }
 
     pub fn in_port(&mut self, port: u16) -> u8 {
         // En el Spectrum, el teclado se lee cuando el bit 0 del puerto es 0 (puerto 0xFE).
@@ -102,9 +56,15 @@ impl ZxBus {
     // -------------------------
     // SALIDA DE PUERTOS (OUT)
     // -------------------------
-    pub fn out_port(&mut self, _port: u16, _value: u8) {
-        // Aquí llegarán las instrucciones de Borde (bits 0-2)
-        // y Beeper (bit 4). Por ahora solo ignoramos para avanzar.
+    pub fn out_port(&mut self, port: u16, value: u8) {
+        // Si el bit 0 del puerto es 0, es una escritura a la ULA (Borde, Mic, Beeper)
+        if (port & 0x0001) == 0 {
+            // Los bits 0, 1 y 2 definen el color del borde (0-7)
+            self.border = value & 0x07;
+
+            // Debug para confirmar que funciona
+            println!("Cambio de borde a color: {}", self.border);
+        }
     }
 }
 

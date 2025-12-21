@@ -2,9 +2,7 @@ use zilog_z80::cpu::CPU;
 use std::collections::{HashMap, HashSet};
 use crate::bus::ZxBus;
 use crate::stack_tracker::{StackTracker, StackWriteKind};
-
-pub static mut IM1_COUNT: u64 = 0;
-
+static mut FLASH_CNT: u8 = 0;
 /* ==================================================
  * SNAPSHOT DE CPU
  * ================================================== */
@@ -51,7 +49,7 @@ impl CpuRunState {
     pub fn new() -> Self {
         Self {
             halted: false,
-            iff1: false,
+            iff1: true, // ⬅️ ANTES estaba en false (esto mataba el cursor)
             iff1_pending: false,
             iff1_delay: 0,
             im: 1,
@@ -93,6 +91,21 @@ pub fn init_cpu(rom_path: &str) -> CPU {
 
     cpu.reg.sp = 0xFFFF;
     cpu.reg.pc = DIR_CARGA_ROM;
+
+    // Pruebas ****************************************************+
+    // Cursor visible: posición (0,0)
+    // cpu.bus.write_byte(0x5C3C, 0); // X
+    // cpu.bus.write_byte(0x5C3D, 0); // Y
+    //
+    // // CURCHL apunta a pantalla real
+    // cpu.bus.write_byte(0x5C5C, 0x00);
+    // cpu.bus.write_byte(0x5C5D, 0x40);
+    //
+    // // Atributos visibles (ink blanco, paper negro)
+    // for i in 0..768 {
+    //     cpu.bus.write_byte(0x5800 + i, 0x07);
+    // }
+    // **************************************************************
 
     // Inicializar variables del sistema para evitar basura en pantalla
     cpu.bus.write_byte(0x5C08, 0x00); // FLAGS
@@ -204,6 +217,8 @@ pub fn step(
     // if cpu.reg.pc == 0x11CB { println!("[ROM] Llamada a START"); }
     // if cpu.reg.pc == 0x11EF { println!("[ROM] En RAM-DONE"); }
     // if cpu.reg.pc == 0x15D4 { dbg!("ROM: WAIT-KEY"); }
+    // println!("  TV_COUNT: {}", cpu.bus.read_byte(0x5C3C));
+    // if cpu.reg.pc == 0x18E1 { dbg!("ROM: CURSOR ROUTINE"); }
 
     // if cpu.reg.pc == 0x0B7B {
     //     println!("[ROM] Llamada a PRINT-AT - debería mostrar cursor");
@@ -240,13 +255,31 @@ pub fn step(
     if interrupt_pending && run_state.iff1 && run_state.allow_interrupts {
         run_state.halted = false;
         run_state.iff1 = false;
+
         let pc_at_int = cpu.reg.pc;
+
         let sp = cpu.reg.sp.wrapping_sub(2);
         cpu.reg.sp = sp;
         cpu.bus.write_byte(sp, (pc_at_int & 0x00FF) as u8);
         cpu.bus.write_byte(sp.wrapping_add(1), (pc_at_int >> 8) as u8);
+
         cpu.reg.pc = 0x0038;
         run_state.t_states += 13;
+
+        // -------------PBA------------------
+        // FLASH real del Spectrum
+        // -------------------------------
+        // unsafe {
+        //     FLASH_CNT = FLASH_CNT.wrapping_add(1);
+        //     if FLASH_CNT == 32 {
+        //         FLASH_CNT = 0;
+        //         let mut flags = cpu.bus.read_byte(0x5C08);
+        //         flags ^= 0x80;
+        //         cpu.bus.write_byte(0x5C08, flags);
+        //     }
+        // }
+        // ------------  FIN PBA -----------------
+
         return snapshot(cpu, pc_at_int, 0, 13);
     }
 
@@ -267,6 +300,22 @@ pub fn step(
 
     run_state.t_states += instr_cycles as u64;
     executed.insert(pc_before, (instr_len, mnemonic));
+
+    // --- EMULACIÓN CORRECTA DE TECLADO "SIN TECLA" ---  PBA *****************
+    // LAST_K = 0xFF
+    // cpu.bus.write_byte(0x5C3A, 0xFF);
+    //
+    // // FLAGS: limpiar bit 5 (NEW KEY)
+    // let mut flags = cpu.bus.read_byte(0x5C08);
+    // flags &= !(1 << 5);
+    // cpu.bus.write_byte(0x5C08, flags);
+
+    // FORZAR FLASH ON (solo para prueba)
+    // let mut flags = cpu.bus.read_byte(0x5C08);
+    // flags |= 0x80; // bit 7 = FLASH
+    // cpu.bus.write_byte(0x5C08, flags);
+
+    // FIN PBA *******************************************************************
     snapshot(cpu, pc_before, instr_len, instr_cycles)
 }
 
