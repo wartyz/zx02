@@ -14,54 +14,29 @@ use sdl2::event::Event;
 use sdl2::keyboard::Keycode;
 
 use debugger::{Debugger, RunMode};
-use teclado::Keyboard;
 
 use botones::ButtonAction;
 use stack_tracker::StackTracker;
 use video::Video;
 use std::collections::HashMap;
-use crate::cpu_exec::{init_cpu_with_test, CpuRunState};
+use crate::bus::ZxBus;
+use crate::cpu_exec::CpuRunState;
 
-const RUNFAST_REPORT_EVERY: usize = 10_000;
-const ESCALA_VENTANA_ZX: u32 = 4;
-const ESCALA_PANTALLA_ZX: u32 = 12;
+const TSTATES_PER_FRAME: u64 = 69888;
 const ANCHO_VENTANA: u32 = 3800;
 const ALTO_VENTANA: u32 = 2800;
-const TSTATES_PER_FRAME: u64 = 69888;
+const ESCALA_VENTANA_ZX: u32 = 4;
+const ESCALA_PANTALLA_ZX: u32 = 12;
+
 fn main() -> Result<(), String> {
-    // --------------------------------------------------
-    // CPU + ESTADO
-    // --------------------------------------------------
+    // 1. Creamos el Bus y el Teclado
+    let mut zx_bus = ZxBus::new();
+
+    // 2. Inicializamos la CPU con la ROM
     let mut cpu = init_cpu("ROMS/ZXSpectrum48.rom");
-    //let mut cpu = init_cpu("tests/z80/video_attr_test.bin");
-    //let mut cpu = init_cpu("tests/z80/all_colors_flash.bin");
-    //let mut cpu = init_cpu("tests/z80/flash_test.bin");
-    //let mut cpu = init_cpu("tests/z80/pba00.bin");
-    //let mut cpu = init_cpu("tests/z80/pba01.bin");
-    //let mut cpu = init_cpu("tests/z80/screen_corners.bin");
-    //let mut cpu = init_cpu("tests/z80/cursor_blink.bin");
-    //let mut cpu = init_cpu("tests/z80/stack_call_test.bin");
 
-    // Carga ROM y test
-    // let mut cpu = init_cpu_with_test(
-    //     "ROMS/ZXSpectrum48.rom",
-    //     "tests/z80/cursor_system.bin",
-    // );
-    // Teclado -----------------------------------
-    let mut keyboard = Keyboard::new();
-    //keyboard.apply_to_bus(&mut cpu.bus);
-    // cpu.set_port_in(move |port| {
-    //     if (port & 0x00FF) == 0xFE {
-    //         let high = (port >> 8) as u8;
-    //         keyboard.read_port_fe(high)
-    //     } else {
-    //         0xFF
-    //     }
-    // });
-
-    let mut run_state = CpuRunState::new(); // Estado de la CPU
+    let mut run_state = CpuRunState::new();
     let mut interrupt_pending = false;
-    let mut next_interrupt = TSTATES_PER_FRAME;
 
     let mut executed_instrs = HashMap::new();
     let mut unimpl_tracker = UnimplTracker::new();
@@ -69,107 +44,64 @@ fn main() -> Result<(), String> {
 
     let mut debugger = Debugger::new();
     let mut stack_tracker = StackTracker::new(512);
-
-    // PANTALLA ZX (buffer lógico)
     let mut pantalla = Video::new(ESCALA_VENTANA_ZX);
 
-    // --------------------------------------------------
-    // SDL
-    // --------------------------------------------------
+    // SDL Setup
     let sdl = sdl2::init()?;
     let video_sub = sdl.video()?;
     let ttf = sdl2::ttf::init().map_err(|e| e.to_string())?;
 
-    // ---------------- DEBUG WINDOW ----------------
     let debug_window = video_sub
         .window("ZX Debugger", ANCHO_VENTANA, ALTO_VENTANA)
         .position_centered()
         .build()
         .map_err(|e| e.to_string())?;
 
-    let mut debug_canvas = debug_window
-        .into_canvas()
-        .accelerated()
-        .present_vsync()
-        .build()
-        .map_err(|e| e.to_string())?;
-
+    let mut debug_canvas = debug_window.into_canvas().accelerated().present_vsync().build().map_err(|e| e.to_string())?;
     let font = ttf.load_font("FONTS/DejaVuSansMono.ttf", 16)?;
 
-    // ---------------- ZX SCREEN WINDOW ----------------
     let zx_window = video_sub
-        .window(
-            "ZX Spectrum",
-            256 * ESCALA_PANTALLA_ZX,
-            192 * ESCALA_PANTALLA_ZX,
-        )
+        .window("ZX Spectrum", 256 * ESCALA_PANTALLA_ZX, 192 * ESCALA_PANTALLA_ZX)
         .position_centered()
         .build()
         .map_err(|e| e.to_string())?;
 
-    let mut zx_canvas = zx_window
-        .into_canvas()
-        .accelerated()
-        .present_vsync()
-        .build()
-        .map_err(|e| e.to_string())?;
-
+    let mut zx_canvas = zx_window.into_canvas().accelerated().present_vsync().build().map_err(|e| e.to_string())?;
     let mut event_pump = sdl.event_pump()?;
 
-    // --------------------------------------------------
     // BUCLE PRINCIPAL
-    // --------------------------------------------------
     'running: loop {
-        //keyboard.apply_to_bus(&mut cpu.bus);
         for event in event_pump.poll_iter() {
             match event {
-                Event::Quit { .. } => break 'running,
-
-                Event::KeyDown {
-                    keycode: Some(Keycode::Escape),
-                    ..
-                } => break 'running,
+                Event::Quit { .. } | Event::KeyDown { keycode: Some(Keycode::Escape), .. } => break 'running,
                 Event::KeyDown { keycode: Some(k), repeat: false, .. } => {
-                    keyboard.key_down(k);
+                    // IMPORTANTE: Usar el teclado que está dentro del bus
+                    zx_bus.keyboard.key_down(k);
                 }
-
-                Event::KeyUp { keycode: Some(_), .. } => {
-                    keyboard.key_up();
+                Event::KeyUp { keycode: Some(k), .. } => {
+                    // Ahora le pasamos 'k' (el Keycode) para que sepa qué bit liberar
+                    zx_bus.keyboard.key_up(k);
                 }
-
                 Event::MouseButtonDown { x, y, .. } => {
                     for b in botones::default_buttons() {
                         if b.contains(x, y) {
                             match b.action {
                                 ButtonAction::Step => {
-                                    debugger.step();
-
-                                    if debugger.check_breakpoint(cpu.reg.pc) {
-                                        last_snapshot = Some(cpu_exec::snapshot(
-                                            &cpu,
-                                            cpu.reg.pc,
-                                            0,
-                                            0,
-                                        ));
-                                        continue;
-                                    }
-
                                     let snap = step(
                                         &mut cpu,
+                                        &mut zx_bus,
                                         &mut run_state,
                                         interrupt_pending,
                                         &mut executed_instrs,
                                         &mut unimpl_tracker,
                                         &mut stack_tracker,
                                     );
-
                                     last_snapshot = Some(snap);
-                                    //keyboard.apply_to_bus(&mut cpu.bus);
                                 }
                                 ButtonAction::Run => debugger.run(),
                                 ButtonAction::RunFast => debugger.run_fast(),
                                 ButtonAction::Pause => debugger.pause(),
-                                ButtonAction::Reset => {}
+                                _ => {}
                             }
                         }
                     }
@@ -178,72 +110,24 @@ fn main() -> Result<(), String> {
             }
         }
 
-        // ---------------- CPU RUN ----------------
+        // Ejecución de la CPU
         match debugger.mode {
             RunMode::Run => {
-                if debugger.check_breakpoint(cpu.reg.pc) {
-                    last_snapshot = Some(cpu_exec::snapshot(
-                        &cpu,
-                        cpu.reg.pc,
-                        0,
-                        0,
-                    ));
-                    continue;
-                }
+                let mut states_en_este_frame: u64 = 0;
 
-                let snap = step(
-                    &mut cpu,
-                    &mut run_state,
-                    interrupt_pending,
-                    &mut executed_instrs,
-                    &mut unimpl_tracker,
-                    &mut stack_tracker,
-                );
-
-                // ¿toca interrupción?
-                if run_state.t_states >= next_interrupt {
-                    // cpu.int_request(0xFF); // IM 1
-                    // next_interrupt += TSTATES_PER_FRAME;
-                    interrupt_pending = true;
-                    next_interrupt += TSTATES_PER_FRAME;
-
-                    // sincronización de vídeo (50 Hz)
-                    pantalla.on_vsync();
-
-                    // DEBUG: Verificar estado
-                    println!("[INT] Generada. PC={:04X}, IFF1={}",
-                             cpu.reg.pc, run_state.iff1);
-                }
-
-                last_snapshot = Some(snap);
-                //keyboard.apply_to_bus(&mut cpu.bus);
-
-                /*// ----------------------------------------
-                // IM 1: una interrupción cada ~20 ms (50 Hz)
-                // ----------------------------------------
-                unsafe {
-                    cpu_exec::IM1_COUNT += 1;
-
-                    if cpu_exec::IM1_COUNT % 32 == 0 {
-                        pantalla.flash_phase = !pantalla.flash_phase;
-                    }
-                }*/
-            }
-            RunMode::RunFast => {
-                for _ in 0..50_000 {
-                    //dbg!(cpu.bus.read_byte(0x5C5C));
+                // Ejecutamos instrucciones hasta alcanzar los 69888 ciclos (1 frame)
+                while states_en_este_frame < TSTATES_PER_FRAME {
+                    // FORZAR TECLA J (Fila 6, Bit 3) para probar:
+                    //zx_bus.keyboard.rows[6] &= !(1 << 3);
+                    // Si el PC coincide con un breakpoint, pausamos y salimos del bucle
                     if debugger.check_breakpoint(cpu.reg.pc) {
-                        last_snapshot = Some(cpu_exec::snapshot(
-                            &cpu,
-                            cpu.reg.pc,
-                            0,
-                            0,
-                        ));
+                        debugger.pause();
                         break;
                     }
 
                     let snap = step(
                         &mut cpu,
+                        &mut zx_bus,
                         &mut run_state,
                         interrupt_pending,
                         &mut executed_instrs,
@@ -251,43 +135,69 @@ fn main() -> Result<(), String> {
                         &mut stack_tracker,
                     );
 
-                    // ¿toca interrupción?
-                    if run_state.t_states >= next_interrupt {
-                        interrupt_pending = true;
-                        next_interrupt += TSTATES_PER_FRAME;
-
-                        // sincronización de vídeo (50 Hz)
-                        pantalla.on_vsync();
+                    // Si la CPU aceptó la interrupción (saltó a 0x0038), bajamos la señal
+                    if interrupt_pending && cpu.reg.pc == 0x0038 {
+                        interrupt_pending = false;
                     }
 
+                    states_en_este_frame += snap.instr_cycles as u64;
                     last_snapshot = Some(snap);
-                    //keyboard.apply_to_bus(&mut cpu.bus);
-
-                    if debugger.mode != RunMode::RunFast {
-                        break;
-                    }
                 }
+
+                // Al finalizar el frame, generamos la señal de interrupción para el próximo
+                interrupt_pending = true;
+                run_state.t_states += states_en_este_frame;
+
+                // Actualizamos la estructura de video con la RAM actual
+                pantalla.update_from_bus(&cpu.bus);
+                pantalla.on_vsync();
             }
+
+            RunMode::RunFast => {
+                // En modo rápido, ejecutamos 10 veces más ciclos por cada ciclo de refresco de la UI
+                for _ in 0..10 {
+                    let mut states_sub_frame: u64 = 0;
+                    while states_sub_frame < TSTATES_PER_FRAME {
+                        let snap = step(
+                            &mut cpu,
+                            &mut zx_bus,
+                            &mut run_state,
+                            interrupt_pending,
+                            &mut executed_instrs,
+                            &mut unimpl_tracker,
+                            &mut stack_tracker,
+                        );
+
+                        if interrupt_pending && cpu.reg.pc == 0x0038 {
+                            interrupt_pending = false;
+                        }
+
+                        states_sub_frame += snap.instr_cycles as u64;
+                        last_snapshot = Some(snap);
+                    }
+                    interrupt_pending = true;
+                    run_state.t_states += states_sub_frame;
+                }
+                pantalla.update_from_bus(&cpu.bus);
+            }
+
+            RunMode::Paused => {
+                // En pausa no hacemos nada, la CPU se queda donde está
+            }
+
             _ => {}
         }
-
-        // ---------------- VIDEO UPDATE ----------------
+        // Sincronizar Video y Render
         pantalla.update_from_bus(&cpu.bus);
+        gui::draw_debug(&mut debug_canvas, &font, last_snapshot.as_ref(), &stack_tracker)?;
+        gui::draw_zx_screen(&mut zx_canvas, &pantalla)?;
 
-        // ---------------- RENDER ----------------
-        gui::draw_debug(
-            &mut debug_canvas,
-            &font,
-            last_snapshot.as_ref(),
-            &stack_tracker,
-        )?;
+        // ¡No olvides presentar los cambios!
+        debug_canvas.present();
+        zx_canvas.present();
 
-        gui::draw_zx_screen(
-            &mut zx_canvas,
-            &pantalla,
-        )?;
+        // Pequeño delay para no consumir el 100% de la CPU del PC
+        std::thread::sleep(std::time::Duration::from_millis(16));
     }
-
     Ok(())
 }
-
