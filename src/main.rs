@@ -7,6 +7,7 @@ mod botones;
 mod stack_tracker;
 mod video;
 mod interrupt;
+mod bus;
 
 use cpu_exec::{init_cpu, step, UnimplTracker};
 use sdl2::event::Event;
@@ -14,11 +15,12 @@ use sdl2::keyboard::Keycode;
 
 use debugger::{Debugger, RunMode};
 use teclado::Keyboard;
+
 use botones::ButtonAction;
 use stack_tracker::StackTracker;
 use video::Video;
 use std::collections::HashMap;
-use crate::cpu_exec::CpuRunState;
+use crate::cpu_exec::{init_cpu_with_test, CpuRunState};
 
 const RUNFAST_REPORT_EVERY: usize = 10_000;
 const ESCALA_VENTANA_ZX: u32 = 4;
@@ -36,6 +38,26 @@ fn main() -> Result<(), String> {
     //let mut cpu = init_cpu("tests/z80/flash_test.bin");
     //let mut cpu = init_cpu("tests/z80/pba00.bin");
     //let mut cpu = init_cpu("tests/z80/pba01.bin");
+    //let mut cpu = init_cpu("tests/z80/screen_corners.bin");
+    //let mut cpu = init_cpu("tests/z80/cursor_blink.bin");
+    //let mut cpu = init_cpu("tests/z80/stack_call_test.bin");
+
+    // Carga ROM y test
+    // let mut cpu = init_cpu_with_test(
+    //     "ROMS/ZXSpectrum48.rom",
+    //     "tests/z80/cursor_system.bin",
+    // );
+    // Teclado -----------------------------------
+    let mut keyboard = Keyboard::new();
+    //keyboard.apply_to_bus(&mut cpu.bus);
+    // cpu.set_port_in(move |port| {
+    //     if (port & 0x00FF) == 0xFE {
+    //         let high = (port >> 8) as u8;
+    //         keyboard.read_port_fe(high)
+    //     } else {
+    //         0xFF
+    //     }
+    // });
 
     let mut run_state = CpuRunState::new(); // Estado de la CPU
     let mut interrupt_pending = false;
@@ -98,6 +120,7 @@ fn main() -> Result<(), String> {
     // BUCLE PRINCIPAL
     // --------------------------------------------------
     'running: loop {
+        //keyboard.apply_to_bus(&mut cpu.bus);
         for event in event_pump.poll_iter() {
             match event {
                 Event::Quit { .. } => break 'running,
@@ -106,6 +129,13 @@ fn main() -> Result<(), String> {
                     keycode: Some(Keycode::Escape),
                     ..
                 } => break 'running,
+                Event::KeyDown { keycode: Some(k), repeat: false, .. } => {
+                    keyboard.key_down(k);
+                }
+
+                Event::KeyUp { keycode: Some(_), .. } => {
+                    keyboard.key_up();
+                }
 
                 Event::MouseButtonDown { x, y, .. } => {
                     for b in botones::default_buttons() {
@@ -134,6 +164,7 @@ fn main() -> Result<(), String> {
                                     );
 
                                     last_snapshot = Some(snap);
+                                    //keyboard.apply_to_bus(&mut cpu.bus);
                                 }
                                 ButtonAction::Run => debugger.run(),
                                 ButtonAction::RunFast => debugger.run_fast(),
@@ -171,14 +202,21 @@ fn main() -> Result<(), String> {
 
                 // ¿toca interrupción?
                 if run_state.t_states >= next_interrupt {
-                    cpu.int_request(0xFF); // IM 1
+                    // cpu.int_request(0xFF); // IM 1
+                    // next_interrupt += TSTATES_PER_FRAME;
+                    interrupt_pending = true;
                     next_interrupt += TSTATES_PER_FRAME;
 
                     // sincronización de vídeo (50 Hz)
                     pantalla.on_vsync();
+
+                    // DEBUG: Verificar estado
+                    println!("[INT] Generada. PC={:04X}, IFF1={}",
+                             cpu.reg.pc, run_state.iff1);
                 }
 
                 last_snapshot = Some(snap);
+                //keyboard.apply_to_bus(&mut cpu.bus);
 
                 /*// ----------------------------------------
                 // IM 1: una interrupción cada ~20 ms (50 Hz)
@@ -223,6 +261,7 @@ fn main() -> Result<(), String> {
                     }
 
                     last_snapshot = Some(snap);
+                    //keyboard.apply_to_bus(&mut cpu.bus);
 
                     if debugger.mode != RunMode::RunFast {
                         break;

@@ -46,6 +46,12 @@ impl Video {
                 let addr = zx_screen_addr(x_byte, y);
                 let byte = bus.read_byte(addr);
                 self.store_pixel_byte(x_byte, y, byte);
+
+                // DEBUG
+                // let attr_byte = bus.read_byte(0x5800);
+                // if attr_byte != 0 {
+                //     println!("¡Atributo en 0x5800 detectado!: {:02X}", attr_byte);
+                // }
             }
         }
 
