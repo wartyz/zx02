@@ -8,21 +8,23 @@ mod stack_tracker;
 mod video;
 mod interrupt;
 mod bus;
+mod sna;
 
-use cpu_exec::{init_cpu, step, UnimplTracker};
 use sdl2::event::Event;
 use sdl2::keyboard::Keycode;
 
+use std::collections::HashMap;
+use std::time::{Duration, Instant};
+use zilog_z80::cpu::CPU;
 use debugger::{Debugger, RunMode};
-
 use botones::ButtonAction;
 use stack_tracker::StackTracker;
 use video::Video;
-use std::collections::HashMap;
-use std::time::{Duration, Instant};
-use crate::bus::ZxBus;
-use crate::cpu_exec::CpuRunState;
-use crate::interrupt::InterruptController;
+use cpu_exec::{CpuRunState, init_cpu, step, UnimplTracker};
+use bus::ZxBus;
+use interrupt::InterruptController;
+use crate::cpu_exec::load_rom;
+use crate::sna::apply_sna;
 
 const TSTATES_PER_FRAME: u64 = 69888;
 const ANCHO_VENTANA: u32 = 3800;
@@ -30,12 +32,24 @@ const ALTO_VENTANA: u32 = 2800;
 const ESCALA_VENTANA_ZX: u32 = 4;
 const ESCALA_PANTALLA_ZX: u32 = 12;
 
+// Indica el estado segun presionemos unos botones u otros
+#[derive(Copy, Clone)]
+pub enum LoadState {
+    None,
+    Rom,
+    Sna,
+}
+
 fn main() -> Result<(), String> {
     // 1. Creamos el Bus y el Teclado
     let mut zx_bus = ZxBus::new();
 
     // 2. Inicializamos la CPU con la ROM
-    let mut cpu = init_cpu("ROMS/ZXSpectrum48.rom");
+    //let mut cpu = init_cpu("ROMS/ZXSpectrum48.rom");
+    //let mut cpu = init_cpu("ROMS/ZX48_v2EN.rom");
+    let mut cpu = CPU::new(0xFFFF);
+    //load_rom(&mut cpu, "ROMS/ZXSpectrum48.rom");
+    let mut load_state = LoadState::None; // Estado inicial VACIO
 
     let mut int_ctrl = InterruptController::new();
     let mut run_state = CpuRunState::new();
@@ -60,7 +74,13 @@ fn main() -> Result<(), String> {
         .build()
         .map_err(|e| e.to_string())?;
 
-    let mut debug_canvas = debug_window.into_canvas().accelerated().present_vsync().build().map_err(|e| e.to_string())?;
+    let mut debug_canvas = debug_window
+        .into_canvas()
+        .accelerated()
+        .present_vsync()
+        .build()
+        .map_err(|e| e.to_string())?;
+
     let font = ttf.load_font("FONTS/DejaVuSansMono.ttf", 16)?;
 
     let zx_window = video_sub
@@ -69,7 +89,13 @@ fn main() -> Result<(), String> {
         .build()
         .map_err(|e| e.to_string())?;
 
-    let mut zx_canvas = zx_window.into_canvas().accelerated().present_vsync().build().map_err(|e| e.to_string())?;
+    let mut zx_canvas = zx_window
+        .into_canvas()
+        .accelerated()
+        .present_vsync()
+        .build()
+        .map_err(|e| e.to_string())?;
+
     let mut event_pump = sdl.event_pump()?;
     let frame_duration = Duration::from_micros(20000); // 20ms = 50Hz
 
@@ -107,6 +133,31 @@ fn main() -> Result<(), String> {
                                 ButtonAction::Run => debugger.run(),
                                 ButtonAction::RunFast => debugger.run_fast(),
                                 ButtonAction::Pause => debugger.pause(),
+                                ButtonAction::LoadRom => {
+                                    println!("Cargando ROM...");
+                                    load_rom(&mut cpu, "ROMS/ZXSpectrum48.rom");
+                                    run_state = CpuRunState::new();
+                                    interrupt_pending = false;
+                                    int_ctrl = InterruptController::new();
+                                    last_snapshot = None;
+                                    load_state = LoadState::Rom;
+                                    println!("ROM cargada correctamente");
+                                }
+
+                                ButtonAction::LoadSna => {
+                                    println!("Cargando snapshot SNA...");
+
+                                    let sna = sna::SnaSnapshot::load("SNAPS/manic.sna")
+                                        .map_err(|e| e.to_string())?;
+                                    apply_sna(&mut cpu, &mut run_state, &sna);
+
+                                    interrupt_pending = false;
+                                    int_ctrl = InterruptController::new();
+                                    last_snapshot = None;
+                                    load_state = LoadState::Sna;
+
+                                    println!("SNA cargado correctamente");
+                                }
                                 _ => {}
                             }
                         }
@@ -123,8 +174,6 @@ fn main() -> Result<(), String> {
 
                 // Ejecutamos instrucciones hasta alcanzar los 69888 ciclos (1 frame)
                 while states_en_este_frame < TSTATES_PER_FRAME {
-                    // FORZAR TECLA J (Fila 6, Bit 3) para probar:
-                    //zx_bus.keyboard.rows[6] &= !(1 << 3);
                     // Si el PC coincide con un breakpoint, pausamos y salimos del bucle
                     if debugger.check_breakpoint(cpu.reg.pc) {
                         debugger.pause();
@@ -156,9 +205,6 @@ fn main() -> Result<(), String> {
                 }
 
                 // Al finalizar el frame, generamos la señal de interrupción para el próximo
-                //interrupt_pending = true;
-                //run_state.t_states += states_en_este_frame;
-
                 // Actualizamos la estructura de video con la RAM actual
                 pantalla.update_from_bus(&cpu.bus);
                 pantalla.on_vsync();
@@ -190,7 +236,6 @@ fn main() -> Result<(), String> {
                     }
                     pantalla.on_vsync();
                 }
-                //pantalla.on_vsync();
                 pantalla.update_from_bus(&cpu.bus);
             }
 
@@ -203,15 +248,18 @@ fn main() -> Result<(), String> {
 
         // Sincronizar Video y Render
         pantalla.update_from_bus(&cpu.bus);
-        gui::draw_debug(&mut debug_canvas, &font, last_snapshot.as_ref(), &stack_tracker)?;
+        gui::draw_debug(
+            &mut debug_canvas,
+            &font,
+            last_snapshot.as_ref(),
+            &stack_tracker,
+            load_state,
+        )?;
         gui::draw_zx_screen(&mut zx_canvas, &pantalla)?;
 
         // Presentar los cambios!
         debug_canvas.present();
         zx_canvas.present();
-
-        // Pequeño delay para no consumir el 100% de la CPU del PC
-        //std::thread::sleep(std::time::Duration::from_millis(16));
 
         // ESPERAR para clavar los 50 FPS
         let elapsed = frame_start.elapsed();

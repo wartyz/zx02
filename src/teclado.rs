@@ -118,8 +118,8 @@ impl Keyboard {
     }
 }
 
-/// Mapeo mínimo PC → Spectrum (ampliable)
-fn map_pc_to_spectrum(key: Keycode) -> Option<u8> {
+// Mapeo mínimo PC → Spectrum (ampliable)
+/*fn map_pc_to_spectrum(key: Keycode) -> Option<u8> {
     Some(match key {
         Keycode::A => b'A',
         Keycode::B => b'B',
@@ -153,4 +153,4 @@ fn map_pc_to_spectrum(key: Keycode) -> Option<u8> {
 
         _ => return None,
     })
-}
+}*/

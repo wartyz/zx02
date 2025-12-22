@@ -6,7 +6,7 @@ use sdl2::{
     video::Window,
 };
 
-use crate::botones;
+use crate::{botones, LoadState};
 use crate::disasm::disassemble;
 use crate::cpu_exec::CpuSnapshot;
 use crate::botones::{Button, ButtonAction};
@@ -31,7 +31,6 @@ pub fn draw_zx_screen(
 
     draw_screen(canvas, video, MARGEN_NEGRO, MARGEN_NEGRO)?;
 
-    //canvas.present();
     Ok(())
 }
 
@@ -119,6 +118,7 @@ pub fn draw_debug(
     font: &Font,
     snapshot: Option<&CpuSnapshot>,
     stack_tracker: &StackTracker,
+    load_state: LoadState,
 ) -> Result<(), String> {
     canvas.set_draw_color(Color::BLACK);
     canvas.clear();
@@ -132,8 +132,26 @@ pub fn draw_debug(
     }
 
     draw_buttons(canvas, font, &botones::default_buttons())?;
-    //canvas.present();
+    draw_load_state(canvas, font, load_state)?;
+
     Ok(())
+}
+
+/* ================================================== */
+/* DIBUJA EL ESTADO DE CARGA VACIO, ROM O SNA         */
+/* ================================================== */
+fn draw_load_state(
+    canvas: &mut Canvas<Window>,
+    font: &Font,
+    state: LoadState,
+) -> Result<(), String> {
+    let (text, color) = match state {
+        LoadState::None => ("NO CARGADO", Color::RGB(255, 0, 0)),     // Rojo
+        LoadState::Rom => ("ROM CARGADA", Color::RGB(0, 255, 0)),   // Verde
+        LoadState::Sna => ("SNA CARGADO", Color::RGB(255, 255, 0)), // Amarillo
+    };
+
+    draw_text_color(canvas, font, &format!("ESTADO: {}", text), 280, 56, color)
 }
 
 /* ================================================== */
@@ -309,7 +327,7 @@ fn draw_instruction_window(
         // coincide exactamente con current_pc.
         let bytes_restantes = &s.mem_dump[offset..];
 
-        // Importante: le pasamos current_pc como dirección actual 
+        // Importante: le pasamos current_pc como dirección actual
         // y también como base del buffer para que el offset interno sea 0.
         let (mnemonic, len) = disassemble(bytes_restantes, current_pc, current_pc);
 
@@ -386,11 +404,11 @@ fn draw_stack(
 
         // Usamos el stack_tracker para colorear el origen del dato
         let color = match stack_tracker.last_write_to(addr) {
-            Some(StackWriteKind::Call) => Color::RGB(0, 255, 0),      // Verde: Direcciones de retorno
-            Some(StackWriteKind::Push) => Color::RGB(0, 150, 255),    // Azul: Datos PUSH
+            Some(StackWriteKind::Call) => Color::RGB(0, 255, 0),        // Verde: Direcciones de retorno
+            Some(StackWriteKind::Push) => Color::RGB(0, 150, 255),      // Azul: Datos PUSH
             Some(StackWriteKind::Interrupt) => Color::RGB(255, 50, 50), // Rojo: Interrupciones
-            Some(StackWriteKind::Manual) => Color::RGB(255, 165, 0),  // Naranja: Escritura manual
-            _ => Color::RGB(150, 150, 150),                          // Gris: Desconocido
+            Some(StackWriteKind::Manual) => Color::RGB(255, 165, 0),    // Naranja: Escritura manual
+            _ => Color::RGB(150, 150, 150),                             // Gris: Desconocido
         };
 
         draw_text_color(
@@ -434,6 +452,8 @@ pub fn draw_buttons(
             ButtonAction::RunFast => "FAST",
             ButtonAction::Pause => "PAUSE",
             ButtonAction::Reset => "RESET",
+            ButtonAction::LoadRom => "LROM",
+            ButtonAction::LoadSna => "LSNA",
         };
 
         let surface = font

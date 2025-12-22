@@ -1,576 +1,3 @@
-/*pub fn disassemble(mem: &[u8], pc: u16, base: u16) -> (String, u8) {
-    let index = pc.wrapping_sub(base) as usize;
-    if index >= mem.len() {
-        return ("<fuera de memoria>".to_string(), 1);
-    }
-
-    let b0 = mem[index];
-
-    let regs = ["B", "C", "D", "E", "H", "L", "(HL)", "A"];
-    let rp = ["BC", "DE", "HL", "SP"];
-    let cond = ["NZ", "Z", "NC", "C"];
-
-    match b0 {
-        /* ==================================================
-         * PREFIJO ED
-         * ================================================== */
-
-        0xED => {
-            if index + 1 >= mem.len() {
-                return ("ED <incompleto>".to_string(), 1);
-            }
-
-            let b1 = mem[index + 1];
-
-            match b1 {
-                /* ---------------------------------
-                 * ADC HL,rr
-                 * --------------------------------- */
-                0x4A | 0x5A | 0x6A | 0x7A => {
-                    let r = (b1 >> 4) & 3;
-                    (format!("ADC HL,{}", rp[r as usize]), 2)
-                }
-
-                /* ---------------------------------
-                 * SBC HL,rr
-                 * --------------------------------- */
-                0x42 | 0x52 | 0x62 | 0x72 => {
-                    let r = (b1 >> 4) & 3;
-                    (format!("SBC HL,{}", rp[r as usize]), 2)
-                }
-
-                /* ---------------------------------
-                 * LD (nn),rr
-                 * --------------------------------- */
-                0x43 | 0x53 | 0x63 | 0x73 => {
-                    if index + 3 >= mem.len() {
-                        return ("LD (nn),rr <incompleto>".to_string(), 2);
-                    }
-
-                    let r = (b1 >> 4) & 3;
-                    let lo = mem[index + 2] as u16;
-                    let hi = mem[index + 3] as u16;
-                    let addr = (hi << 8) | lo;
-
-                    (
-                        format!("LD (0x{:04X}),{}", addr, rp[r as usize]),
-                        4,
-                    )
-                }
-
-                /* ---------------------------------
-                 * IM 0 / 1 / 2
-                 * --------------------------------- */
-                0x46 => ("IM 0".to_string(), 2),
-                0x56 => ("IM 1".to_string(), 2),
-                0x5E => ("IM 2".to_string(), 2),
-
-                /* ---------------------------------
-                 * RETN / RETI
-                 * --------------------------------- */
-                0x45 => ("RETN".to_string(), 2),
-                0x4D => ("RETI".to_string(), 2),
-
-                /* ---------------------------------
-                 * NEG
-                 * --------------------------------- */
-                0x44 | 0x4C | 0x54 | 0x5C |
-                0x64 | 0x6C | 0x74 | 0x7C => {
-                    ("NEG".to_string(), 2)
-                }
-
-                /* ---------------------------------
-                 * LD I,A / LD R,A / LD A,I / LD A,R
-                 * --------------------------------- */
-                0x47 => ("LD I,A".to_string(), 2),
-                0x4F => ("LD R,A".to_string(), 2),
-                0x57 => ("LD A,I".to_string(), 2),
-                0x5F => ("LD A,R".to_string(), 2),
-
-                /* ---------------------------------
-                 * IN r,(C)
-                 * --------------------------------- */
-                b1 if (b1 & 0xC7) == 0x40 => {
-                    let r = (b1 >> 3) & 7;
-                    (format!("IN {},(C)", regs[r as usize]), 2)
-                }
-
-                /* ---------------------------------
-                 * OUT (C),r
-                 * --------------------------------- */
-                b1 if (b1 & 0xC7) == 0x41 => {
-                    let r = (b1 >> 3) & 7;
-                    (format!("OUT (C),{}", regs[r as usize]), 2)
-                }
-
-                /* ---------------------------------
-                 * Block transfer
-                 * --------------------------------- */
-                0xA0 => ("LDI".to_string(), 2),
-                0xA8 => ("LDD".to_string(), 2),
-                0xB0 => ("LDIR".to_string(), 2),
-                0xB8 => ("LDDR".to_string(), 2),
-
-                _ => (format!("DB 0xED,0x{:02X}", b1), 2),
-            }
-        }
-
-
-        /* ==================================================
-         * LD rr,nn
-         * ================================================== */
-        0x01 | 0x11 | 0x21 | 0x31 => {
-            if index + 2 >= mem.len() {
-                return ("LD rr,<incompleto>".to_string(), 1);
-            }
-            let r = (b0 >> 4) & 3;
-            let lo = mem[index + 1] as u16;
-            let hi = mem[index + 2] as u16;
-            let nn = (hi << 8) | lo;
-            (format!("LD {},0x{:04X}", rp[r as usize], nn), 3)
-        }
-
-        /* ==================================================
-         * JP nn  <<< NUEVO >>>
-         * ================================================== */
-        0xC3 => {
-            if index + 2 >= mem.len() {
-                return ("JP <incompleto>".to_string(), 1);
-            }
-            let lo = mem[index + 1] as u16;
-            let hi = mem[index + 2] as u16;
-            let addr = (hi << 8) | lo;
-            (format!("JP 0x{:04X}", addr), 3)
-        }
-
-        /* ==================================================
-         * ADD HL,rr
-         * ================================================== */
-        0x09 | 0x19 | 0x29 | 0x39 => {
-            let r = (b0 >> 4) & 3;
-            (format!("ADD HL,{}", rp[r as usize]), 1)
-        }
-
-        /* ==================================================
-         * INC r
-         * ================================================== */
-        0x04 | 0x0C | 0x14 | 0x1C |
-        0x24 | 0x2C | 0x34 | 0x3C => {
-            let r = (b0 >> 3) & 7;
-            (format!("INC {}", regs[r as usize]), 1)
-        }
-
-        /* ==================================================
-         * INC rr
-         * ================================================== */
-        0x03 | 0x13 | 0x23 | 0x33 => {
-            let r = (b0 >> 4) & 3;
-            (format!("INC {}", rp[r as usize]), 1)
-        }
-
-        /* ==================================================
-         * DEC rr
-         * ================================================== */
-        0x0B | 0x1B | 0x2B | 0x3B => {
-            let r = (b0 >> 4) & 3;
-            (format!("DEC {}", rp[r as usize]), 1)
-        }
-
-        /* ==================================================
-         * DEC r
-         * ================================================== */
-        0x05 | 0x0D | 0x15 | 0x1D | 0x25 | 0x2D | 0x35 | 0x3D => {
-            let r = (b0 >> 3) & 7;
-            (format!("DEC {}", regs[r as usize]), 1)
-        }
-
-        /* ==================================================
-         * AND r
-         * ================================================== */
-        0xA0..=0xA7 => {
-            let r = b0 & 7;
-            (format!("AND {}", regs[r as usize]), 1)
-        }
-
-        /* ==================================================
-         * XOR r
-         * ================================================== */
-        0xA8..=0xAF => {
-            let r = b0 & 7;
-            (format!("XOR {}", regs[r as usize]), 1)
-        }
-
-        /* ==================================================
-         * CP r
-         * ================================================== */
-        0xB8..=0xBF => {
-            let r = b0 & 7;
-            (format!("CP {}", regs[r as usize]), 1)
-        }
-
-        /* ==================================================
-         * JR condicional
-         * ================================================== */
-        0x20 | 0x28 | 0x30 | 0x38 => {
-            let cc = (b0 >> 3) & 3;
-            let disp = mem[index + 1] as i8;
-            let target = pc.wrapping_add(2).wrapping_add(disp as u16);
-            (format!("JR {},0x{:04X}", cond[cc as usize], target), 2)
-        }
-
-        /* ==================================================
-         * JR
-         * ================================================== */
-        0x18 => {
-            let disp = mem[index + 1] as i8;
-            let target = pc.wrapping_add(2).wrapping_add(disp as u16);
-            (format!("JR 0x{:04X}", target), 2)
-        }
-
-        /* ==================================================
-         * DJNZ
-         * ================================================== */
-        0x10 => {
-            if index + 1 >= mem.len() {
-                return ("DJNZ <incompleto>".to_string(), 1);
-            }
-
-            let disp = mem[index + 1] as i8;
-            let target = pc.wrapping_add(2).wrapping_add(disp as u16);
-
-            (format!("DJNZ 0x{:04X}", target), 2)
-        }
-
-        /* ==================================================
-         * EXX
-         * ================================================== */
-        0xD9 => ("EXX".to_string(), 1),
-
-        /* ==================================================
-         * DI / EI
-         * ================================================== */
-        0xF3 => ("DI".to_string(), 1),
-        0xFB => ("EI".to_string(), 1),
-
-        /* ==================================================
-         * XOR n
-         * ================================================== */
-        0xEE => {
-            let n = mem[index + 1];
-            (format!("XOR 0x{:02X}", n), 2)
-        }
-
-        /* ==================================================
-         * OR r
-         * ================================================== */
-        0xB0..=0xB7 => {
-            let r = b0 & 7;
-            (format!("OR {}", regs[r as usize]), 1)
-        }
-
-        /* ==================================================
-         * SUB r
-         * ================================================== */
-        0x90..=0x97 => {
-            let r = b0 & 7;
-            (format!("SUB {}", regs[r as usize]), 1)
-        }
-
-        /* ==================================================
-         * ADD A,r
-         * ================================================== */
-        0x80..=0x87 => {
-            let r = b0 & 7;
-            (format!("ADD A,{}", regs[r as usize]), 1)
-        }
-
-        /* ==================================================
-         * ADC A,r
-         * ================================================== */
-        0x88..=0x8F => {
-            let r = b0 & 7;
-            (format!("ADC A,{}", regs[r as usize]), 1)
-        }
-
-        /* ==================================================
-         * SBC A,r
-         * ================================================== */
-        0x98..=0x9F => {
-            let r = b0 & 7;
-            (format!("SBC A,{}", regs[r as usize]), 1)
-        }
-
-
-
-
-        /* ==================================================
-         * OUT / IN
-         * ================================================== */
-        0xD3 => {
-            let p = mem[index + 1];
-            (format!("OUT (0x{:02X}),A", p), 2)
-        }
-        0xDB => {
-            let p = mem[index + 1];
-            (format!("IN A,(0x{:02X})", p), 2)
-        }
-
-        /* ==================================================
-         * LD r,n
-         * ================================================== */
-        0x06 | 0x0E | 0x16 | 0x1E |
-        0x26 | 0x2E | 0x36 | 0x3E => {
-            if index + 1 >= mem.len() {
-                return ("LD r,<incompleto>".to_string(), 1);
-            }
-            let r = (b0 >> 3) & 7;
-            let n = mem[index + 1];
-            (format!("LD {},0x{:02X}", regs[r as usize], n), 2)
-        }
-
-        /* ==================================================
-         * LD r,r
-         * ================================================== */
-        0x40..=0x7F => {
-            if b0 == 0x76 {
-                ("HALT".to_string(), 1)
-            } else {
-                let dst = (b0 >> 3) & 7;
-                let src = b0 & 7;
-                (
-                    format!("LD {},{}", regs[dst as usize], regs[src as usize]),
-                    1,
-                )
-            }
-        }
-
-        /* ==================================================
-         * LD (nn),HL  /  LD HL,(nn)
-         * ================================================== */
-        0x22 | 0x2A => {
-            if index + 2 >= mem.len() {
-                return ("LD (nn),HL <incompleto>".to_string(), 1);
-            }
-
-            let lo = mem[index + 1] as u16;
-            let hi = mem[index + 2] as u16;
-            let addr = (hi << 8) | lo;
-
-            if b0 == 0x22 {
-                (format!("LD (0x{:04X}),HL", addr), 3)
-            } else {
-                (format!("LD HL,(0x{:04X})", addr), 3)
-            }
-        }
-
-        /* ==================================================
-         * LD (nn),A  /  LD A,(nn)
-         * ================================================== */
-        0x32 | 0x3A => {
-            if index + 2 >= mem.len() {
-                return ("LD (nn),A <incompleto>".to_string(), 1);
-            }
-
-            let lo = mem[index + 1] as u16;
-            let hi = mem[index + 2] as u16;
-            let addr = (hi << 8) | lo;
-
-            if b0 == 0x32 {
-                (format!("LD (0x{:04X}),A", addr), 3)
-            } else {
-                (format!("LD A,(0x{:04X})", addr), 3)
-            }
-        }
-
-        /* ==================================================
-         * CALL nn
-         * ================================================== */
-        0xCD => {
-            if index + 2 >= mem.len() {
-                return ("CALL <incompleto>".to_string(), 1);
-            }
-
-            let lo = mem[index + 1] as u16;
-            let hi = mem[index + 2] as u16;
-            let addr = (hi << 8) | lo;
-
-            (format!("CALL 0x{:04X}", addr), 3)
-        }
-
-        /* ==================================================
-         * RET cc
-         * ================================================== */
-        0xC0 | 0xC8 | 0xD0 | 0xD8 |
-        0xE0 | 0xE8 | 0xF0 | 0xF8 => {
-            let cc = (b0 >> 3) & 7;
-            let conds = ["NZ", "Z", "NC", "C", "PO", "PE", "P", "M"];
-            (format!("RET {}", conds[cc as usize]), 1)
-        }
-
-        /* ==================================================
-         * RET
-         * ================================================== */
-        0xC9 => ("RET".to_string(), 1),
-
-        /* ==================================================
-         * POP rr
-         * ================================================== */
-        0xC1 | 0xD1 | 0xE1 | 0xF1 => {
-            let rp2 = ["BC", "DE", "HL", "AF"];
-            let r = (b0 >> 4) & 3;
-            (format!("POP {}", rp2[r as usize]), 1)
-        }
-
-        /* ==================================================
-         * PUSH rr
-         * ================================================== */
-        0xC5 | 0xD5 | 0xE5 | 0xF5 => {
-            let rp2 = ["BC", "DE", "HL", "AF"];
-            let r = (b0 >> 4) & 3;
-            (format!("PUSH {}", rp2[r as usize]), 1)
-        }
-
-        /* ==================================================
-         * EX DE,HL
-         * ================================================== */
-        0xEB => ("EX DE,HL".to_string(), 1),
-
-        /* ==================================================
-         * LD SP,HL
-         * ================================================== */
-        0xF9 => ("LD SP,HL".to_string(), 1),
-
-        /* ==================================================
-         * PREFIJO FD  (IY)
-         * ================================================== */
-        0xFD => {
-            if index + 1 >= mem.len() {
-                return ("FD <incompleto>".to_string(), 1);
-            }
-
-            let b1 = mem[index + 1];
-
-            match b1 {
-                /* LD IY,nn */
-                0x21 => {
-                    if index + 3 >= mem.len() {
-                        return ("LD IY,<incompleto>".to_string(), 2);
-                    }
-
-                    let lo = mem[index + 2] as u16;
-                    let hi = mem[index + 3] as u16;
-                    let nn = (hi << 8) | lo;
-
-                    (format!("LD IY,0x{:04X}", nn), 4)
-                }
-
-                /* ---------------------------------
-                 * DEC (IY+d)
-                 * --------------------------------- */
-                0x35 => {
-                    if index + 2 >= mem.len() {
-                        return ("DEC (IY+?) <incompleto>".to_string(), 2);
-                    }
-
-                    let d = mem[index + 2];
-                    (format!("DEC (IY+0x{:02X})", d), 3)
-                }
-
-                /* ---------------------------------
-                 * FD CB d xx : BIT / RES / SET (IY+d)
-                 * --------------------------------- */
-                0xCB => {
-                    if index + 3 >= mem.len() {
-                        return ("FD CB <incompleto>".to_string(), 2);
-                    }
-
-                    let d = mem[index + 2];
-                    let op = mem[index + 3];
-
-                    let bit = (op >> 3) & 7;
-                    let group = op >> 6;
-
-                    let mnemonic = match group {
-                        0b01 => format!("BIT {},(IY+0x{:02X})", bit, d),
-                        0b10 => format!("RES {},(IY+0x{:02X})", bit, d),
-                        0b11 => format!("SET {},(IY+0x{:02X})", bit, d),
-                        _ => format!("DB 0xFD,0xCB,0x{:02X},0x{:02X}", d, op),
-                    };
-
-                    (mnemonic, 4)
-                }
-
-                /* ---------------------------------
-                 * LD (IY+d),r
-                 * --------------------------------- */
-                0x70..=0x77 => {
-                    if index + 2 >= mem.len() {
-                        return ("LD (IY+d),r <incompleto>".to_string(), 2);
-                    }
-
-                    let d = mem[index + 2];
-                    let r = b1 & 7;
-                    let regs = ["B", "C", "D", "E", "H", "L", "(HL)", "A"];
-
-                    (format!("LD (IY+0x{:02X}),{}", d, regs[r as usize]), 3)
-                }
-
-                _ => (format!("DB 0xFD,0x{:02X}", b1), 2),
-            }
-        }
-
-
-
-        /* ==================================================
-         * BÁSICAS
-         * ================================================== */
-        0x00 => ("NOP".to_string(), 1),
-
-        _ => (format!("DB 0x{:02X}", b0), 1),
-    }
-}
-*/
-/* =========================================================
- * Z80 DISASSEMBLER
- * =========================================================
- *
- * Organización:
- *
- * 1) Prefijos
- *    - ED
- *    - FD (IY)
- *
- * 2) ALU 16-bit
- *    - ADD HL,rr
- *    - INC rr
- *    - DEC rr
- *
- * 3) ALU 8-bit
- *    - ADD / ADC / SUB / SBC
- *    - AND / OR / XOR / CP
- *
- * 4) Control de flujo
- *    - JR / JR cc / DJNZ
- *    - JP / CALL
- *    - RET / RET cc
- *
- * 5) Stack
- *    - PUSH / POP
- *
- * 6) Load
- *    - LD rr,nn
- *    - LD r,n
- *    - LD r,r
- *    - LD (nn),xx
- *
- * 7) Especiales
- *    - EX / EXX
- *    - DI / EI
- *
- * 8) Básicas / fallback
- * =========================================================
- */
-
 pub fn disassemble(mem: &[u8], pc: u16, base: u16) -> (String, u8) {
     let index = pc.wrapping_sub(base) as usize;
     if index >= mem.len() {
@@ -584,7 +11,10 @@ pub fn disassemble(mem: &[u8], pc: u16, base: u16) -> (String, u8) {
          * PREFIJOS
          * ================================================== */
         0xED => decode_ed(mem, index),
+        0xDD => decode_dd(mem, index),
         0xFD => decode_fd(mem, index),
+        0xCB => decode_cb(mem, index),
+
 
         /* ==================================================
          * ALU 16-bit
@@ -606,12 +36,26 @@ pub fn disassemble(mem: &[u8], pc: u16, base: u16) -> (String, u8) {
         0xB8..=0xBF => decode_alu_r("CP", b0),
 
         /* ==================================================
-         * AND n
+         * DEC r
          * ================================================== */
-        0xE6 => {
-            let n = mem[index + 1];
-            (format!("AND 0x{:02X}", n), 2)
+        0x05 | 0x0D | 0x15 | 0x1D |
+        0x25 | 0x2D | 0x35 | 0x3D => {
+            let r = (b0 >> 3) & 7;
+            (format!("DEC {}", regs()[r as usize]), 1)
         }
+
+
+        /* ==================================================
+         * ALU n (inmediato)
+         * ================================================== */
+        0xC6 => (format!("ADD A,0x{:02X}", mem[index + 1]), 2),
+        0xCE => (format!("ADC A,0x{:02X}", mem[index + 1]), 2),
+        0xD6 => (format!("SUB 0x{:02X}", mem[index + 1]), 2),
+        0xDE => (format!("SBC A,0x{:02X}", mem[index + 1]), 2),
+        0xE6 => (format!("AND 0x{:02X}", mem[index + 1]), 2),
+        0xEE => (format!("XOR 0x{:02X}", mem[index + 1]), 2),
+        0xF6 => (format!("OR 0x{:02X}", mem[index + 1]), 2),
+        0xFE => (format!("CP 0x{:02X}", mem[index + 1]), 2),
 
 
         /* ==================================================
@@ -626,6 +70,21 @@ pub fn disassemble(mem: &[u8], pc: u16, base: u16) -> (String, u8) {
         0xC9 => ("RET".to_string(), 1),
         0xC0 | 0xC8 | 0xD0 | 0xD8 |
         0xE0 | 0xE8 | 0xF0 | 0xF8 => decode_ret_cc(b0),
+
+        /* ==================================================
+         * JP cc,nn
+         * ================================================== */
+        0xC2 | 0xCA | 0xD2 | 0xDA |
+        0xE2 | 0xEA | 0xF2 | 0xFA => {
+            let conds = ["NZ", "Z", "NC", "C", "PO", "PE", "P", "M"];
+            let cc = (b0 >> 3) & 7;
+            let lo = mem[index + 1] as u16;
+            let hi = mem[index + 2] as u16;
+            (format!("JP {},0x{:04X}", conds[cc as usize], (hi << 8) | lo), 3)
+        }
+
+        0xE9 => ("JP (HL)".to_string(), 1),
+
 
         /* ==================================================
          * RST p
@@ -650,7 +109,7 @@ pub fn disassemble(mem: &[u8], pc: u16, base: u16) -> (String, u8) {
         0x06 | 0x0E | 0x16 | 0x1E |
         0x26 | 0x2E | 0x36 | 0x3E => decode_ld_r_n(mem, index, b0),
 
-        0x40..=0x7F => decode_ld_r_r(b0),
+        0x40..=0x7F => decode_ld_r_r__halt(b0),
         0x22 | 0x2A => decode_ld_nn_hl(mem, index, b0),
         0x32 | 0x3A => decode_ld_nn_a(mem, index, b0),
 
@@ -663,10 +122,22 @@ pub fn disassemble(mem: &[u8], pc: u16, base: u16) -> (String, u8) {
         0xFB => ("EI".to_string(), 1),
 
         /* ==================================================
+         * IN / OUT (puerto inmediato)
+         * ================================================== */
+        0xD3 => {
+            let p = mem[index + 1];
+            (format!("OUT (0x{:02X}),A", p), 2)
+        }
+        0xDB => {
+            let p = mem[index + 1];
+            (format!("IN A,(0x{:02X})", p), 2)
+        }
+
+
+        /* ==================================================
          * BÁSICAS
          * ================================================== */
         0x00 => ("NOP".to_string(), 1),
-        //0x76 => ("HALT".to_string(), 1),
 
         _ => (format!("DB 0x{:02X}", b0), 1),
     }
@@ -777,7 +248,7 @@ fn decode_ld_r_n(mem: &[u8], index: usize, b0: u8) -> (String, u8) {
     (format!("LD {},0x{:02X}", regs()[r as usize], n), 2)
 }
 
-fn decode_ld_r_r(b0: u8) -> (String, u8) {
+fn decode_ld_r_r__halt(b0: u8) -> (String, u8) {
     if b0 == 0x76 {
         ("HALT".to_string(), 1)
     } else {
@@ -928,7 +399,7 @@ fn decode_ed(mem: &[u8], index: usize) -> (String, u8) {
     }
 }
 
-fn decode_fd(mem: &[u8], index: usize) -> (String, u8) {
+/*fn decode_fd(mem: &[u8], index: usize) -> (String, u8) {
     if index + 1 >= mem.len() {
         return ("FD <incompleto>".to_string(), 1);
     }
@@ -985,6 +456,279 @@ fn decode_fd(mem: &[u8], index: usize) -> (String, u8) {
         }
 
         _ => (format!("DB 0xFD,0x{:02X}", b1), 2),
+    }
+}*/
+
+fn decode_fd(mem: &[u8], index: usize) -> (String, u8) {
+    if index + 1 >= mem.len() {
+        return ("FD <incompleto>".to_string(), 1);
+    }
+
+    let b1 = mem[index + 1];
+    let regs = ["B", "C", "D", "E", "H", "L", "(HL)", "A"];
+    let rp = ["BC", "DE", "IY", "SP"];
+
+    match b1 {
+        /* ==================================================
+         * LD IY,nn
+         * ================================================== */
+        0x21 => {
+            // if index + 3 >= mem.len() {
+            //     return ("LD IY,<incompleto>".to_string(), 2);
+            // }
+            let lo = mem[index + 2] as u16;
+            let hi = mem[index + 3] as u16;
+            (format!("LD IY,0x{:04X}", (hi << 8) | lo), 4)
+        }
+
+        /* ==================================================
+         * INC / DEC IY
+         * ================================================== */
+        0x23 => ("INC IY".to_string(), 2),
+        0x2B => ("DEC IY".to_string(), 2),
+
+        /* ==================================================
+         * ADD IY,rr
+         * ================================================== */
+        0x09 | 0x19 | 0x29 | 0x39 => {
+            let r = (b1 >> 4) & 3;
+            (format!("ADD IY,{}", rp[r as usize]), 2)
+        }
+        /* ==================================================
+         * PUSH / POP IY
+         * ================================================== */
+        0xE5 => ("PUSH IY".to_string(), 2),
+        0xE1 => ("POP IY".to_string(), 2),
+
+        /* ==================================================
+         * LD SP,IY
+         * ================================================== */
+        0xF9 => ("LD SP,IY".to_string(), 2),
+
+        /* ==================================================
+          * INC / DEC (IY+d)
+          * ================================================== */
+        0x34 => {
+            let d = mem[index + 2] as i8;
+            (format!("INC (IY{:+})", d), 3)
+        }
+        0x35 => {
+            let d = mem[index + 2] as i8;
+            (format!("DEC (IY{:+})", d), 3)
+        }
+
+
+        /* ==================================================
+         * LD r,(IY+d)
+         * ================================================== */
+        0x46 | 0x4E | 0x56 | 0x5E |
+        0x66 | 0x6E | 0x7E => {
+            let d = mem[index + 2] as i8;
+            let r = (b1 >> 3) & 7;
+            (format!("LD {},(IY{:+})", regs[r as usize], d), 3)
+        }
+
+        /* ==================================================
+         * LD (IY+d),r
+         * ================================================== */
+        0x70..=0x77 => {
+            let d = mem[index + 2] as i8;
+            let r = b1 & 7;
+            (format!("LD (IY{:+}),{}", d, regs[r as usize]), 3)
+        }
+
+        /* ==================================================
+         * ALU A,(IY+d)
+         * ================================================== */
+        0x86 => (format!("ADD A,(IY{:+})", mem[index + 2] as i8), 3),
+        0x8E => (format!("ADC A,(IY{:+})", mem[index + 2] as i8), 3),
+        0x96 => (format!("SUB (IY{:+})", mem[index + 2] as i8), 3),
+        0x9E => (format!("SBC A,(IY{:+})", mem[index + 2] as i8), 3),
+        0xA6 => (format!("AND (IY{:+})", mem[index + 2] as i8), 3),
+        0xAE => (format!("XOR (IY{:+})", mem[index + 2] as i8), 3),
+        0xB6 => (format!("OR (IY{:+})", mem[index + 2] as i8), 3),
+        0xBE => (format!("CP (IY{:+})", mem[index + 2] as i8), 3),
+
+        /* ==================================================
+         * FD CB d xx : BIT / RES / SET
+         * ================================================== */
+        0xCB => {
+            let d = mem[index + 2] as i8;
+            let op = mem[index + 3];
+            let bit = (op >> 3) & 7;
+
+            match op >> 6 {
+                0b01 => (format!("BIT {},(IY{:+})", bit, d), 4),
+                0b10 => (format!("RES {},(IY{:+})", bit, d), 4),
+                0b11 => (format!("SET {},(IY{:+})", bit, d), 4),
+                _ => (format!("DB 0xFD,0xCB,0x{:02X},0x{:02X}", d as u8, op), 4),
+            }
+        }
+
+        _ => (format!("DB 0xFD,0x{:02X}", b1), 2),
+    }
+}
+
+fn decode_dd(mem: &[u8], index: usize) -> (String, u8) {
+    if index + 1 >= mem.len() {
+        return ("DD <incompleto>".to_string(), 1);
+    }
+
+    let b1 = mem[index + 1];
+    let regs = ["B", "C", "D", "E", "H", "L", "(HL)", "A"];
+    let rp = ["BC", "DE", "IX", "SP"];
+
+    match b1 {
+        /* ==================================================
+         * LD IX,nn
+         * ================================================== */
+        0x21 => {
+            let lo = mem[index + 2] as u16;
+            let hi = mem[index + 3] as u16;
+            (format!("LD IX,0x{:04X}", (hi << 8) | lo), 4)
+        }
+        /* ==================================================
+                 * INC / DEC IX
+                 * ================================================== */
+        0x23 => ("INC IX".to_string(), 2),
+        0x2B => ("DEC IX".to_string(), 2),
+
+        /* ==================================================
+         * ADD IX,rr
+         * ================================================== */
+        0x09 | 0x19 | 0x29 | 0x39 => {
+            let r = (b1 >> 4) & 3;
+            (format!("ADD IX,{}", rp[r as usize]), 2)
+        }
+
+        /* ==================================================
+         * PUSH / POP IX
+         * ================================================== */
+        0xE5 => ("PUSH IX".to_string(), 2),
+        0xE1 => ("POP IX".to_string(), 2),
+
+        /* ==================================================
+         * LD SP,IX
+         * ================================================== */
+
+        0xF9 => ("LD SP,IX".to_string(), 2),
+
+        /* ==================================================
+         * INC / DEC (IX+d)
+         * ================================================== */
+        0x34 => {
+            let d = mem[index + 2] as i8;
+            (format!("INC (IX{:+})", d), 3)
+        }
+        0x35 => {
+            let d = mem[index + 2] as i8;
+            (format!("DEC (IX{:+})", d), 3)
+        }
+
+        /* ==================================================
+         * LD r,(IX+d)
+         * ================================================== */
+        0x46 | 0x4E | 0x56 | 0x5E |
+        0x66 | 0x6E | 0x7E => {
+            let d = mem[index + 2] as i8;
+            let r = (b1 >> 3) & 7;
+            (format!("LD {},(IX{:+})", regs[r as usize], d), 3)
+        }
+
+        /* ==================================================
+         * LD (IX+d),r
+         * ================================================== */
+        0x70..=0x77 => {
+            let d = mem[index + 2] as i8;
+            let r = b1 & 7;
+            (format!("LD (IX{:+}),{}", d, regs[r as usize]), 3)
+        }
+
+        /* ==================================================
+         * ALU A,(IX+d)
+         * ================================================== */
+        0x86 => (format!("ADD A,(IX{:+})", mem[index + 2] as i8), 3),
+        0x8E => (format!("ADC A,(IX{:+})", mem[index + 2] as i8), 3),
+        0x96 => (format!("SUB (IX{:+})", mem[index + 2] as i8), 3),
+        0x9E => (format!("SBC A,(IX{:+})", mem[index + 2] as i8), 3),
+        0xA6 => (format!("AND (IX{:+})", mem[index + 2] as i8), 3),
+        0xAE => (format!("XOR (IX{:+})", mem[index + 2] as i8), 3),
+        0xB6 => (format!("OR (IX{:+})", mem[index + 2] as i8), 3),
+        0xBE => (format!("CP (IX{:+})", mem[index + 2] as i8), 3),
+
+        /* ==================================================
+         * DD CB d xx : BIT / RES / SET
+         * ================================================== */
+        0xCB => {
+            let d = mem[index + 2] as i8;
+            let op = mem[index + 3];
+            let bit = (op >> 3) & 7;
+
+            match op >> 6 {
+                0b01 => (format!("BIT {},(IX{:+})", bit, d), 4),
+                0b10 => (format!("RES {},(IX{:+})", bit, d), 4),
+                0b11 => (format!("SET {},(IX{:+})", bit, d), 4),
+                _ => (format!("DB 0xDD,0xCB,0x{:02X},0x{:02X}", d as u8, op), 4),
+            }
+        }
+
+        _ => (format!("DB 0xDD,0x{:02X}", b1), 2),
+    }
+}
+fn decode_cb(mem: &[u8], index: usize) -> (String, u8) {
+    if index + 1 >= mem.len() {
+        return ("CB <incompleto>".to_string(), 1);
+    }
+
+    let op = mem[index + 1];
+    let regs = ["B", "C", "D", "E", "H", "L", "(HL)", "A"];
+
+    let group = op >> 6;
+    let n = (op >> 3) & 0x07;
+    let r = op & 0x07;
+
+    match group {
+        /* ===========================
+         * ROT / SHIFT
+         * =========================== */
+        0b00 => {
+            let mnem = match n {
+                0 => "RLC",
+                1 => "RRC",
+                2 => "RL",
+                3 => "RR",
+                4 => "SLA",
+                5 => "SRA",
+                6 => "SLL", // no estándar, algunos Z80 lo usan
+                7 => "SRL",
+                _ => unreachable!(),
+            };
+
+            (format!("{} {}", mnem, regs[r as usize]), 2)
+        }
+
+        /* ===========================
+         * BIT n,r
+         * =========================== */
+        0b01 => {
+            (format!("BIT {},{}", n, regs[r as usize]), 2)
+        }
+
+        /* ===========================
+         * RES n,r
+         * =========================== */
+        0b10 => {
+            (format!("RES {},{}", n, regs[r as usize]), 2)
+        }
+
+        /* ===========================
+         * SET n,r
+         * =========================== */
+        0b11 => {
+            (format!("SET {},{}", n, regs[r as usize]), 2)
+        }
+
+        _ => unreachable!(),
     }
 }
 

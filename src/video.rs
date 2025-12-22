@@ -35,8 +35,8 @@ impl Video {
                 let attr = bus.read_byte(attr_addr);
 
                 // 3. Extraer componentes del atributo
-                let ink = attr & 0x07;           // Bits 0-2
-                let paper = (attr >> 3) & 0x07;  // Bits 3-5
+                let ink = attr & 0x07;            // Bits 0-2
+                let paper = (attr >> 3) & 0x07;   // Bits 3-5
                 let bright = (attr & 0x40) != 0; // Bit 6
                 let flash = (attr & 0x80) != 0;  // Bit 7
 

@@ -2,7 +2,7 @@ use zilog_z80::cpu::CPU;
 use std::collections::{HashMap, HashSet};
 use crate::bus::ZxBus;
 use crate::stack_tracker::{StackTracker, StackWriteKind};
-static mut FLASH_CNT: u8 = 0;
+
 /* ==================================================
  * SNAPSHOT DE CPU
  * ================================================== */
@@ -80,6 +80,29 @@ impl UnimplTracker {
     }
 }
 
+// Carga una ROM en la memoria de la CPU
+pub fn load_rom(cpu: &mut CPU, path: &str) {
+    // Limpiar memoria
+    for i in 0x0000..=0xFFFF {
+        cpu.bus.write_byte(i, 0);
+    }
+
+    // Cargar ROM
+    cpu.bus.load_bin(path, 0x0000).expect("Error cargando ROM");
+
+    // Estado inicial Spectrum 48K
+    cpu.reg.pc = 0x0000;
+    cpu.reg.sp = 0xFFFF;
+
+    cpu.reg.i = 0;
+    cpu.reg.r = 0;
+
+    // Variables del sistema
+    cpu.bus.write_byte(0x5C08, 0x00); // FLAGS
+    cpu.bus.write_byte(0x5C5C, 0x00);
+    cpu.bus.write_byte(0x5C5D, 0x40);
+}
+
 /* ==================================================
  * INICIALIZACIÓN DE CPU
  * ================================================== */
@@ -91,21 +114,6 @@ pub fn init_cpu(rom_path: &str) -> CPU {
 
     cpu.reg.sp = 0xFFFF;
     cpu.reg.pc = DIR_CARGA_ROM;
-
-    // Pruebas ****************************************************+
-    // Cursor visible: posición (0,0)
-    // cpu.bus.write_byte(0x5C3C, 0); // X
-    // cpu.bus.write_byte(0x5C3D, 0); // Y
-    //
-    // // CURCHL apunta a pantalla real
-    // cpu.bus.write_byte(0x5C5C, 0x00);
-    // cpu.bus.write_byte(0x5C5D, 0x40);
-    //
-    // // Atributos visibles (ink blanco, paper negro)
-    // for i in 0..768 {
-    //     cpu.bus.write_byte(0x5800 + i, 0x07);
-    // }
-    // **************************************************************
 
     // Inicializar variables del sistema para evitar basura en pantalla
     cpu.bus.write_byte(0x5C08, 0x00); // FLAGS
@@ -174,9 +182,6 @@ pub fn step(
             cpu.reg.pc = pc_before.wrapping_add(2);
             run_state.t_states += 11;
 
-            // Log para confirmar que la ROM está leyendo el teclado
-            //println!("--- LECTURA TECLADO DETECTADA: Port {:04X} -> Val {:02X} ---", port, val);
-
             executed.insert(pc_before, (2, mnemonic));
             return snapshot(cpu, pc_before, 2, 11);
         }
@@ -195,7 +200,7 @@ pub fn step(
 
     let instr_cycles = cpu.execute();
 
-    // --- BLOQUE DE DEBUG PRINTLNS ---
+    // -------------- BLOQUE DE DEBUG PRINTLNS ------------------
     // let iy_full = ((cpu.reg.iyh as u16) << 8) | (cpu.reg.iyl as u16);
     //
     // if cpu.reg.pc >= 0x1219 && cpu.reg.pc <= 0x12A2 {
@@ -266,20 +271,6 @@ pub fn step(
         cpu.reg.pc = 0x0038;
         run_state.t_states += 13;
 
-        // -------------PBA------------------
-        // FLASH real del Spectrum
-        // -------------------------------
-        // unsafe {
-        //     FLASH_CNT = FLASH_CNT.wrapping_add(1);
-        //     if FLASH_CNT == 32 {
-        //         FLASH_CNT = 0;
-        //         let mut flags = cpu.bus.read_byte(0x5C08);
-        //         flags ^= 0x80;
-        //         cpu.bus.write_byte(0x5C08, flags);
-        //     }
-        // }
-        // ------------  FIN PBA -----------------
-
         return snapshot(cpu, pc_at_int, 0, 13);
     }
 
@@ -301,21 +292,6 @@ pub fn step(
     run_state.t_states += instr_cycles as u64;
     executed.insert(pc_before, (instr_len, mnemonic));
 
-    // --- EMULACIÓN CORRECTA DE TECLADO "SIN TECLA" ---  PBA *****************
-    // LAST_K = 0xFF
-    // cpu.bus.write_byte(0x5C3A, 0xFF);
-    //
-    // // FLAGS: limpiar bit 5 (NEW KEY)
-    // let mut flags = cpu.bus.read_byte(0x5C08);
-    // flags &= !(1 << 5);
-    // cpu.bus.write_byte(0x5C08, flags);
-
-    // FORZAR FLASH ON (solo para prueba)
-    // let mut flags = cpu.bus.read_byte(0x5C08);
-    // flags |= 0x80; // bit 7 = FLASH
-    // cpu.bus.write_byte(0x5C08, flags);
-
-    // FIN PBA *******************************************************************
     snapshot(cpu, pc_before, instr_len, instr_cycles)
 }
 
