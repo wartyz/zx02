@@ -3,7 +3,7 @@ use sdl2::keyboard::Keycode;
 pub struct Keyboard {
     // 8 filas (una por cada bit del byte alto de la dirección del puerto)
     // Cada fila tiene 5 bits (bits 0-4). Un bit a 0 significa tecla PULSADA.
-    pub(crate) rows: [u8; 8],
+    pub rows: [u8; 8],
 
 }
 impl Keyboard {
@@ -30,6 +30,7 @@ impl Keyboard {
         // Obtenemos fila y bit. Si la tecla no está mapeada, no hacemos nada.
         if let Some((row, bit)) = self.get_matrix_coords(key) {
             if pressed {
+                dbg!(key);
                 self.rows[row] &= !(1 << bit); // Ponemos el bit a 0 (Pulsada)
             } else {
                 self.rows[row] |= 1 << bit;    // Ponemos el bit a 1 (Soltada)

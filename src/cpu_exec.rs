@@ -21,7 +21,11 @@ pub struct CpuSnapshot {
     pub hl_: u16,
     pub i: u8,
     pub r: u8,
+
     pub f: u8,
+    pub f_before: u8,    // para saber el estado de f anterior y gestionar colores
+    pub from_step: bool, // para saber que estoy usando el boton STEP
+
     pub mem_addr: u16,
     pub mem_value: u8,
     pub mem_base: u16,
@@ -144,16 +148,19 @@ pub fn step(
     executed: &mut HashMap<u16, (u8, String)>,
     unimpl: &mut UnimplTracker,
     stack_tracker: &mut StackTracker,
+    from_step: bool,
 ) -> CpuSnapshot {
     let pc_before = cpu.reg.pc;
     let sp_before = cpu.reg.sp;
+    // averiguamos antes de ejecutar el valor de F para poner colores
+    let f_before = (cpu.reg.get_af() & 0x00FF) as u8;
 
     if run_state.halted {
         if interrupt_pending && run_state.iff1 {
             run_state.halted = false;
         } else {
             run_state.t_states += 4;
-            return snapshot(cpu, pc_before, 0, 4);
+            return snapshot(cpu, pc_before, false, f_before, 0, 4);
         }
     }
 
@@ -183,7 +190,7 @@ pub fn step(
             run_state.t_states += 11;
 
             executed.insert(pc_before, (2, mnemonic));
-            return snapshot(cpu, pc_before, 2, 11);
+            return snapshot(cpu, pc_before, false, f_before, 2, 11);
         }
     }
 
@@ -194,7 +201,7 @@ pub fn step(
             cpu.reg.a = zx_bus.in_port(port);
             cpu.reg.pc = pc_before.wrapping_add(2);
             run_state.t_states += 12;
-            return snapshot(cpu, pc_before, 2, 12);
+            return snapshot(cpu, pc_before, false, f_before, 2, 12);
         }
     }
 
@@ -271,7 +278,7 @@ pub fn step(
         cpu.reg.pc = 0x0038;
         run_state.t_states += 13;
 
-        return snapshot(cpu, pc_at_int, 0, 13);
+        return snapshot(cpu, pc_at_int, false, f_before, 0, 13);
     }
 
     // Tracking stack
@@ -292,14 +299,14 @@ pub fn step(
     run_state.t_states += instr_cycles as u64;
     executed.insert(pc_before, (instr_len, mnemonic));
 
-    snapshot(cpu, pc_before, instr_len, instr_cycles)
+    snapshot(cpu, pc_before, from_step, f_before, instr_len, instr_cycles)
 }
 
 /* ==================================================
  * SNAPSHOT (BUFFER AMPLIADO PARA GUI)
  * ================================================== */
 
-pub(crate) fn snapshot(cpu: &CPU, pc: u16, instr_len: u8, instr_cycles: u32) -> CpuSnapshot {
+pub fn snapshot(cpu: &CPU, pc: u16, from_step: bool, f_before: u8, instr_len: u8, instr_cycles: u32) -> CpuSnapshot {
     // 512 bytes alrededor del PC para que el desensamblador del GUI tenga margen
     let mem_base = pc.saturating_sub(128);
     let mut mem_dump = Vec::with_capacity(512);
@@ -327,6 +334,8 @@ pub(crate) fn snapshot(cpu: &CPU, pc: u16, instr_len: u8, instr_cycles: u32) -> 
         i: cpu.reg.i,
         r: cpu.reg.r,
         f: (cpu.reg.get_af() & 0x00FF) as u8,
+        f_before,
+        from_step,
         mem_addr: pc,
         mem_value: cpu.bus.read_byte(pc),
         mem_base,

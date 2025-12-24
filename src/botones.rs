@@ -5,8 +5,10 @@ pub enum ButtonAction {
     RunFast,
     Pause,
     Reset,
-    LoadRom,
-    LoadSna,
+    //LoadRom,
+    //LoadSna,
+    Load,
+    DebugToggle,
 }
 
 pub struct Button {
@@ -32,7 +34,10 @@ pub fn default_buttons() -> Vec<Button> {
         Button { x: 400, y: 10, w: 80, h: 30, action: ButtonAction::Reset },
 
         // Fila inferior (carga)
-        Button { x: 10, y: 50, w: 120, h: 30, action: ButtonAction::LoadRom },
-        Button { x: 140, y: 50, w: 120, h: 30, action: ButtonAction::LoadSna },
+        //Button { x: 10, y: 50, w: 120, h: 30, action: ButtonAction::LoadRom },
+        //Button { x: 140, y: 50, w: 120, h: 30, action: ButtonAction::LoadSna },
+
+        Button { x: 10, y: 50, w: 120, h: 30, action: ButtonAction::Load },
+        Button { x: 140, y: 50, w: 80, h: 30, action: ButtonAction::DebugToggle },
     ]
 }

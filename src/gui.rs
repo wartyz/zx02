@@ -10,13 +10,14 @@ use crate::{botones, LoadState};
 use crate::disasm::disassemble;
 use crate::cpu_exec::CpuSnapshot;
 use crate::botones::{Button, ButtonAction};
+use crate::constantes::{MARGEN_NEGRO, ZX_BORDER, ZX_H, ZX_W};
 use crate::stack_tracker::{StackTracker, StackWriteKind};
 use crate::video::Video;
 
-const ZX_W: i32 = 256;
-const ZX_H: i32 = 192;
-const MARGEN_NEGRO: i32 = 20;
-const ZX_BORDER: i32 = 16;
+// const ZX_W: i32 = 256;
+// const ZX_H: i32 = 192;
+// const MARGEN_NEGRO: i32 = 20;
+// const ZX_BORDER: i32 = 16;
 
 /* ================================================== */
 /* PANTALLA ZX SPECTRUM                               */
@@ -119,26 +120,29 @@ pub fn draw_debug(
     snapshot: Option<&CpuSnapshot>,
     stack_tracker: &StackTracker,
     load_state: LoadState,
+    debug_enabled: bool,
 ) -> Result<(), String> {
     canvas.set_draw_color(Color::BLACK);
     canvas.clear();
 
-    if let Some(s) = snapshot {
-        draw_registers(canvas, font, s)?;
-        draw_flags(canvas, font, s)?;
-        draw_memory_dump(canvas, font, s)?;
-        draw_instruction_window(canvas, font, s)?;
-        draw_stack(canvas, font, s, stack_tracker, 360, 260)?;
+    if debug_enabled {
+        if let Some(s) = snapshot {
+            draw_registers(canvas, font, s)?;
+            draw_flags(canvas, font, s)?;
+            draw_memory_dump(canvas, font, s)?;
+            draw_instruction_window(canvas, font, s)?;
+            draw_stack(canvas, font, s, stack_tracker, 560, 360)?;
+        }
     }
 
-    draw_buttons(canvas, font, &botones::default_buttons())?;
+    draw_buttons(canvas, font, &botones::default_buttons(), debug_enabled)?;
     draw_load_state(canvas, font, load_state)?;
 
     Ok(())
 }
 
 /* ================================================== */
-/* DIBUJA EL ESTADO DE CARGA VACIO, ROM O SNA         */
+/* DIBUJA EL ESTADO DE CARGA VACIO, ROM, SNA O BIN    */
 /* ================================================== */
 fn draw_load_state(
     canvas: &mut Canvas<Window>,
@@ -146,9 +150,11 @@ fn draw_load_state(
     state: LoadState,
 ) -> Result<(), String> {
     let (text, color) = match state {
-        LoadState::None => ("NO CARGADO", Color::RGB(255, 0, 0)),     // Rojo
+        LoadState::None => ("NO CARGADO", Color::RGB(255, 0, 0)),   // Rojo
         LoadState::Rom => ("ROM CARGADA", Color::RGB(0, 255, 0)),   // Verde
         LoadState::Sna => ("SNA CARGADO", Color::RGB(255, 255, 0)), // Amarillo
+        LoadState::Z80 => ("Z80 CARGADO", Color::RGB(255, 255, 0)), // Amarillo
+        LoadState::Bin => ("BIN CARGADO", Color::RGB(255, 0, 255)), // Violeta
     };
 
     draw_text_color(canvas, font, &format!("ESTADO: {}", text), 280, 56, color)
@@ -204,7 +210,7 @@ fn draw_registers(
     let x1 = 20;
     let x2 = 180;
     let x3 = 360;
-    let y0 = 80;
+    let y0 = 100;
     let dy = 20;
 
     // Columna 1
@@ -229,7 +235,7 @@ fn draw_registers(
     Ok(())
 }
 
-fn draw_flags(
+/*fn draw_flags(
     canvas: &mut Canvas<Window>,
     font: &Font,
     s: &CpuSnapshot,
@@ -250,6 +256,61 @@ fn draw_flags(
         100,
         255,
     )?;
+    Ok(())
+}
+*/
+fn draw_flags(
+    canvas: &mut Canvas<Window>,
+    font: &Font,
+    s: &CpuSnapshot,
+) -> Result<(), String> {
+    // Flags reales del Z80 (incluyendo no documentados)
+    let labels = ["S", "Z", "Y", "H", "X", "P", "N", "C"];
+    let bits = [7, 6, 5, 4, 3, 2, 1, 0];
+
+    //let x0 = 0;
+    let y0 = 230;
+    let dx = 35;
+
+    // Título
+    //draw_text(canvas, font, "FLAGS:", x0, y0)?;
+
+    // Fila de etiquetas
+    for (i, label) in labels.iter().enumerate() {
+        draw_text(
+            canvas,
+            font,
+            label,
+            20 + (i as i32 * dx),
+            y0,
+        )?;
+    }
+
+    // Fila de valores (con color)
+    for (i, &bit) in bits.iter().enumerate() {
+        let before = (s.f_before >> bit) & 1;
+        let after = (s.f >> bit) & 1;
+
+        let color = if s.from_step {
+            match (before, after) {
+                (0, 1) => Color::RGB(0, 255, 0), // 0 → 1
+                (1, 0) => Color::RGB(255, 0, 0), // 1 → 0
+                _ => Color::WHITE,          // sin cambio
+            }
+        } else {
+            Color::WHITE
+        };
+
+        draw_text_color(
+            canvas,
+            font,
+            &after.to_string(),
+            20 + (i as i32 * dx),
+            y0 + 25,
+            color,
+        )?;
+    }
+
     Ok(())
 }
 
@@ -366,7 +427,7 @@ fn draw_instruction_window(
             }
         }
 
-        let text = format!("{:04X}: {:<10}  {}", pc, hex_str, mnemonic);
+        let text = format!("{:04X}: {:<12}  {}", pc, hex_str, mnemonic);
         draw_text_color(canvas, font, &text, start_x, y, color)?;
         y += line_h;
     }
@@ -432,13 +493,25 @@ pub fn draw_buttons(
     canvas: &mut Canvas<Window>,
     font: &Font,
     buttons: &[Button],
+    debug_enabled: bool,
 ) -> Result<(), String> {
     for b in buttons {
         // Rectángulo del cuerpo del botón
         let rect = Rect::new(b.x, b.y, b.w as u32, b.h as u32);
 
+        // Poner color segun esté true o false DEBUG
+        let bg_color = match b.action {
+            ButtonAction::DebugToggle => {
+                if debug_enabled {
+                    Color::RGB(0, 120, 0)   // VERDE → DEBUG ON
+                } else {
+                    Color::RGB(160, 0, 0)   // ROJO → DEBUG OFF
+                }
+            }
+            _ => Color::RGB(60, 60, 60), // botones normales
+        };
         // Color de fondo (Gris oscuro)
-        canvas.set_draw_color(Color::RGB(60, 60, 60));
+        canvas.set_draw_color(bg_color);
         canvas.fill_rect(rect)?;
 
         // Borde del botón (Gris claro)
@@ -452,8 +525,10 @@ pub fn draw_buttons(
             ButtonAction::RunFast => "FAST",
             ButtonAction::Pause => "PAUSE",
             ButtonAction::Reset => "RESET",
-            ButtonAction::LoadRom => "LROM",
-            ButtonAction::LoadSna => "LSNA",
+            //ButtonAction::LoadRom => "LROM",
+            //ButtonAction::LoadSna => "LSNA",
+            ButtonAction::Load => "LOAD",
+            ButtonAction::DebugToggle => "DBG",
         };
 
         let surface = font

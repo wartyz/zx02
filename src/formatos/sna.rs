@@ -1,6 +1,8 @@
 use std::fs::File;
 use std::io::{Read, Result};
+use std::path::Path;
 use zilog_z80::cpu::CPU;
+use crate::constantes::SIZE_SNA;
 use crate::cpu_exec::CpuRunState;
 
 /// Snapshot SNA de ZX Spectrum 48K
@@ -32,12 +34,13 @@ pub struct SnaSnapshot {
 
 impl SnaSnapshot {
     /// Carga un fichero .sna (48K)
-    pub fn load(path: &str) -> Result<Self> {
+
+    pub fn load(path: &Path) -> Result<Self> {
         let mut file = File::open(path)?;
         let mut data = Vec::new();
         file.read_to_end(&mut data)?;
 
-        if data.len() != 49179 {
+        if data.len() != SIZE_SNA {
             panic!("Tamaño inválido de .sna (esperado 49179 bytes)");
         }
 
@@ -90,6 +93,63 @@ impl SnaSnapshot {
     }
 }
 
+/* pub fn load(path: &str) -> Result<Self> {
+    let mut file = File::open(path)?;
+    let mut data = Vec::new();
+    file.read_to_end(&mut data)?;
+
+    if data.len() != 49179 {
+        panic!("Tamaño inválido de .sna (esperado 49179 bytes)");
+    }
+
+    // --- Cabecera ---
+    let i = data[0];
+
+    let hl_ = u16::from_le_bytes([data[1], data[2]]);
+    let de_ = u16::from_le_bytes([data[3], data[4]]);
+    let bc_ = u16::from_le_bytes([data[5], data[6]]);
+    let af_ = u16::from_le_bytes([data[7], data[8]]);
+
+    let hl = u16::from_le_bytes([data[9], data[10]]);
+    let de = u16::from_le_bytes([data[11], data[12]]);
+    let bc = u16::from_le_bytes([data[13], data[14]]);
+
+    let iy = u16::from_le_bytes([data[15], data[16]]);
+    let ix = u16::from_le_bytes([data[17], data[18]]);
+
+    let iff2 = data[19] != 0;
+    let r = data[20];
+
+    let af = u16::from_le_bytes([data[21], data[22]]);
+    let sp = u16::from_le_bytes([data[23], data[24]]);
+
+    let im = data[25] & 0x03;
+
+    // data[26] = border color (opcional, no crítico ahora)
+
+    // --- RAM ---
+    let ram = data[27..].to_vec();
+
+    Ok(Self {
+        i,
+        hl_,
+        de_,
+        bc_,
+        af_,
+        hl,
+        de,
+        bc,
+        iy,
+        ix,
+        iff2,
+        r,
+        af,
+        sp,
+        im,
+        ram,
+    })
+}*/
+
 pub fn apply_sna(cpu: &mut CPU, run_state: &mut CpuRunState, sna: &SnaSnapshot) {
     // -------------------------
     // RAM (0x4000–0xFFFF)
@@ -141,7 +201,7 @@ pub fn apply_sna(cpu: &mut CPU, run_state: &mut CpuRunState, sna: &SnaSnapshot) 
     run_state.im = sna.im;
     run_state.halted = false;
     run_state.allow_interrupts = true;
-    
+
     // -------------------------
     // Tiempo
     // -------------------------
