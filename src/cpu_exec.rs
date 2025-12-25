@@ -186,6 +186,7 @@ pub fn step(
         if (port & 0x01) == 0 {
             let val = zx_bus.in_port(port);
             cpu.reg.a = val;
+            // Nota: IN A, (n) NO afecta a los flags en un Z80 real.
             cpu.reg.pc = pc_before.wrapping_add(2);
             run_state.t_states += 11;
 
@@ -194,11 +195,49 @@ pub fn step(
         }
     }
 
-    // Intercepción para IN A, (C) -> Opcode ED 78
+    /*// Intercepción para IN A, (C) -> Opcode ED 78
     if instr_bytes[0] == 0xED && instr_bytes[1] == 0x78 {
         let port = cpu.reg.get_bc(); // Usa el registro BC completo como puerto
         if (port & 0x01) == 0 {
             cpu.reg.a = zx_bus.in_port(port);
+            cpu.reg.pc = pc_before.wrapping_add(2);
+            run_state.t_states += 12;
+            return snapshot(cpu, pc_before, false, f_before, 2, 12);
+        }
+    }*/
+
+    // 2. Intercepción universal para IN r, (C) -> Opcodes ED 40 a ED 78
+    if instr_bytes[0] == 0xED && (instr_bytes[1] & 0xC7 == 0x40) {
+        let port = cpu.reg.get_bc();
+        if (port & 0x01) == 0 {
+            let val = zx_bus.in_port(port);
+
+            // 1. Guardar el valor en el registro correspondiente
+            match (instr_bytes[1] >> 3) & 0x07 {
+                0 => cpu.reg.b = val,
+                1 => cpu.reg.c = val,
+                2 => cpu.reg.d = val,
+                3 => cpu.reg.e = val,
+                4 => cpu.reg.h = val,
+                5 => cpu.reg.l = val,
+                7 => cpu.reg.a = val,
+                _ => {} // Caso 6 es IN (C) que solo afecta a flags
+            }
+
+            // 2. Actualizar FLAGS
+            // En zilog_z80, el registro F es el byte bajo de AF.
+            let mut f = (cpu.reg.get_af() & 0xFF00); // Limpiamos los flags viejos
+            let mut new_f: u8 = 0;
+
+            if val & 0x80 != 0 { new_f |= 0x80; } // Sign
+            if val == 0 { new_f |= 0x40; }        // Zero
+            if val.count_ones() % 2 == 0 { new_f |= 0x04; } // Parity
+
+            // El bit 1 (N) se pone a 0 en instrucciones IN
+            // El bit 4 (H) se pone a 0 en instrucciones IN
+
+            cpu.reg.set_af(f | (new_f as u16));
+
             cpu.reg.pc = pc_before.wrapping_add(2);
             run_state.t_states += 12;
             return snapshot(cpu, pc_before, false, f_before, 2, 12);
