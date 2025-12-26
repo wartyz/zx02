@@ -131,7 +131,7 @@ pub fn draw_debug(
             draw_flags(canvas, font, s)?;
             draw_memory_dump(canvas, font, s)?;
             draw_instruction_window(canvas, font, s)?;
-            draw_stack(canvas, font, s, stack_tracker, 560, 360)?;
+            draw_stack(canvas, font, s, stack_tracker, 600, 360)?;
         }
     }
 
@@ -319,7 +319,7 @@ fn draw_memory_dump(
     font: &Font,
     s: &CpuSnapshot,
 ) -> Result<(), String> {
-    let start_x = 560;
+    let start_x = 600;
     let start_y = 20;
     let line_h = 20;
     let bytes_per_line = 16;
@@ -525,6 +525,7 @@ pub fn draw_buttons(
             ButtonAction::RunFast => "FAST",
             ButtonAction::Pause => "PAUSE",
             ButtonAction::Reset => "RESET",
+            ButtonAction::HwReset => "HWRST",
             //ButtonAction::LoadRom => "LROM",
             //ButtonAction::LoadSna => "LSNA",
             ButtonAction::Load => "LOAD",

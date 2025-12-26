@@ -3,7 +3,7 @@ pub const ANCHO_VENTANA: u32 = 3800;
 pub const ALTO_VENTANA: u32 = 2800;
 pub const ESCALA_VENTANA_ZX: u32 = 4;
 pub const ESCALA_PANTALLA_ZX: u32 = 12;
-pub const RAM_LEN_MAX: usize = 49152;
+pub const RAM_LEN_MAX: usize = 48 * 1024;
 
 pub const SIZE_SNA: usize = 49179;
 

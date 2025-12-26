@@ -7,6 +7,116 @@ use crate::stack_tracker::{StackTracker, StackWriteKind};
  * SNAPSHOT DE CPU
  * ================================================== */
 
+/*
+Struct Bus
+
+Summary
+pub struct Bus { /* private fields */ }
+The Bus struct is hosting the Z80 memory map.
+
+Implementations
+Source
+impl Bus
+Source
+pub fn new(size: u16) -> Bus
+Creates a new bus instance. ‘Size’ will be its top address.
+
+Source
+pub fn set_romspace(&mut self, start: u16, end: u16)
+Sets a ROM space. Write operations will be ineffective in this address range.
+
+use zilog_z80::cpu::CPU;
+let mut c = CPU::new(0xFFFF);
+c.bus.set_romspace(0xF000, 0xFFFF);
+Source
+pub fn read_mem_slice(&self, start: usize, end: usize) -> Vec<u8> ⓘ
+Reads a slice of bytes from memory
+
+Source
+pub fn clear_mem_slice(&mut self, start: usize, end: usize)
+Clears a slice of bytes in memory
+
+Source
+pub fn read_byte(&self, address: u16) -> u8
+Reads a byte from memory
+
+Examples found in repository?
+examples/cpmrun.rs (line 47)
+fn bdos_call(c: &CPU) {
+    if c.reg.c == 0x09 {
+        let mut a = c.reg.get_de();
+        loop {
+            let c = c.bus.read_byte(a);
+            if c as char == '$' {
+                break;
+            } else {
+                a += 1;
+            }
+            print!("{}", c as char);
+        }
+    }
+    if c.reg.c == 0x02 {
+        print!("{}", c.reg.e as char);
+    }
+}
+Source
+pub fn write_byte(&mut self, address: u16, data: u8)
+Writes a byte to memory
+
+Source
+pub fn read_word(&self, address: u16) -> u16
+Reads a word stored in memory in little endian byte order, returns this word in BE byte order
+
+Source
+pub fn read_le_word(&self, address: u16) -> u16
+Reads a word stored in memory in little endian byte order, returns this word in LE byte order
+
+Source
+pub fn read_le_dword(&self, address: u16) -> u32
+Reads a dword stored in memory in little endian byte order, returns this dword in LE byte order
+
+Source
+pub fn write_word(&mut self, address: u16, data: u16)
+Writes a word to memory in little endian byte order
+
+Examples found in repository?
+examples/cpmrun.rs (line 18)
+fn load_execute() -> Result<(), Box<dyn Error>> {
+    let a: Vec<String> = env::args().collect();
+    let mut c = CPU::new(0xFFFF);
+    // Loads assembled program into memory
+    c.bus.load_bin(&a[1], 0x100)?;
+
+    // RET at 0x05 for mocking of CP/M BDOS system calls
+    c.bus.write_word(0x0005, 0xc9);
+
+    // Setting PC to 0x0100 (CP/M Binaries are loaded with a 256 byte offset)
+    c.reg.pc = 0x0100;
+
+    /* Setting up stack : by disassembling CP/M software, it seems
+    that the $0006 address is read to set the stack by some programs */
+    c.bus.write_word(0x0006, 0xFF00);
+
+    /* Setting up stack in case of the program does not read the $0006 address
+    and does not set any stack. */
+    c.reg.sp = 0xFF00;
+
+    loop {
+        c.execute();
+        if c.reg.pc == 0x0005 {
+            bdos_call(&c)
+        }
+        if c.reg.pc == 0x0000 {
+            break;
+        } //  if CP/M warm boot -> we exit
+    }
+    Ok(())
+}
+Source
+pub fn load_bin(&mut self, file: &str, org: u16) -> Result<usize>
+
+ */
+
 #[derive(Clone, Debug)]
 pub struct CpuSnapshot {
     pub pc: u16,
@@ -73,6 +183,10 @@ pub struct UnimplTracker {
 impl UnimplTracker {
     pub fn new() -> Self {
         Self { seen: HashSet::new() }
+    }
+
+    pub fn clear(&mut self) {
+        self.seen.clear();
     }
 
     pub fn report(&mut self, pc: u16, bytes: &[u8], mnemonic: &str) {
@@ -185,6 +299,7 @@ pub fn step(
         // Si es el puerto de teclado (bit 0 = 0)
         if (port & 0x01) == 0 {
             let val = zx_bus.in_port(port);
+
             cpu.reg.a = val;
             // Nota: IN A, (n) NO afecta a los flags en un Z80 real.
             cpu.reg.pc = pc_before.wrapping_add(2);

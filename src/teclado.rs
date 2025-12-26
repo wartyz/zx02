@@ -30,7 +30,6 @@ impl Keyboard {
         // Obtenemos fila y bit. Si la tecla no está mapeada, no hacemos nada.
         if let Some((row, bit)) = self.get_matrix_coords(key) {
             if pressed {
-                dbg!(key);
                 self.rows[row] &= !(1 << bit); // Ponemos el bit a 0 (Pulsada)
             } else {
                 self.rows[row] |= 1 << bit;    // Ponemos el bit a 1 (Soltada)

@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::path::Path;
 use sdl2::render::Canvas;
 use sdl2::ttf::Font;
 use sdl2::video::Window;
@@ -44,7 +45,7 @@ pub struct ZxMachine {
 impl ZxMachine {
     /// Crea una máquina ZX exactamente igual a la inicialización actual del main
     pub fn new(video_scale: u32) -> Self {
-        Self {
+        let mut m = Self {
             cpu: CPU::new(0xFFFF),
             bus: ZxBus::new(),
 
@@ -63,7 +64,13 @@ impl ZxMachine {
             debug_enabled: false,
             load_state: LoadState::None,
 
-        }
+        };
+
+        // CARGA AUTOMÁTICA DE ROM
+        m.load_rom(Path::new("ROMS/ZXSpectrum48.rom"))
+            .expect("No se pudo cargar la ROM");
+
+        m
     }
 
     /// Ejecuta CPU según el modo actual (Run / RunFast)
@@ -79,6 +86,48 @@ impl ZxMachine {
                     if self.debugger.check_breakpoint(self.cpu.reg.pc) {
                         self.debugger.pause();
                         break;
+                    }
+                    let pc = self.cpu.reg.pc;
+                    let opcode = self.cpu.bus.read_byte(pc);
+
+                    // Intercepción universal de entrada de puertos ANTES de ejecutar
+                    // // El opcode 0xDB es "IN A, (n)"
+                    if opcode == 0xDB {
+                        let n = self.cpu.bus.read_byte(pc + 1);
+                        let port = ((self.cpu.reg.a as u16) << 8) | n as u16;
+
+                        if (port & 0x01) == 0 {
+                            let val = self.bus.in_port(port);
+                            self.cpu.reg.a = val;
+                            self.cpu.reg.pc = pc + 2;
+                            self.run_state.t_states += 11;
+                            return; // ⬅️ no llamar a step()
+                        }
+                    }
+                    // Intercepción universal para IN r, (C) -> Opcodes ED 40 a ED 78
+                    if opcode == 0xED {
+                        let op2 = self.cpu.bus.read_byte(pc + 1);
+                        if (op2 & 0xC7) == 0x40 {
+                            let port = self.cpu.reg.get_bc();
+                            if (port & 0x01) == 0 {
+                                let val = self.bus.in_port(port);
+
+                                match (op2 >> 3) & 7 {
+                                    0 => self.cpu.reg.b = val,
+                                    1 => self.cpu.reg.c = val,
+                                    2 => self.cpu.reg.d = val,
+                                    3 => self.cpu.reg.e = val,
+                                    4 => self.cpu.reg.h = val,
+                                    5 => self.cpu.reg.l = val,
+                                    7 => self.cpu.reg.a = val,
+                                    _ => {}
+                                }
+
+                                self.cpu.reg.pc = pc + 2;
+                                self.run_state.t_states += 12;
+                                return;
+                            }
+                        }
                     }
 
                     let snap = step(
@@ -212,28 +261,23 @@ impl ZxMachine {
         }
     }
 
-    pub fn load_file(&mut self, kind: LoadResult) {
-        // Estado común tras cualquier carga
-        self.interrupt_pending = false;
-        self.interrupt_ctrl = InterruptController::new();
-        self.last_snapshot = None;
-        self.run_state.halted = false;
-
-        // Decidir estado según lo cargado
-        self.load_state = match kind {
-            LoadResult::Rom => LoadState::Rom,
-            LoadResult::Sna => LoadState::Sna,
-            LoadResult::Z80 => LoadState::Z80,
-            LoadResult::Bin => LoadState::Bin,
-        };
-
-        // Política de debug (una sola para todos, como pedías)
-        // 🔹 aquí puedes cambiar el criterio cuando quieras
-        // por ahora: NO tocar debug_enabled
-        // self.debug_enabled = self.debug_enabled;
-
-        println!("ZxMachine: carga completada -> {:?}", self.load_state);
-    }
+    // pub fn load_file(&mut self, kind: LoadResult) {
+    //     // Estado común tras cualquier carga
+    //     self.interrupt_pending = false;
+    //     self.interrupt_ctrl = InterruptController::new();
+    //     self.last_snapshot = None;
+    //     self.run_state.halted = false;
+    //
+    //     // Decidir estado según lo cargado
+    //     self.load_state = match kind {
+    //         LoadResult::Rom => LoadState::Rom,
+    //         LoadResult::Sna => LoadState::Sna,
+    //         LoadResult::Z80 => LoadState::Z80,
+    //         LoadResult::Bin => LoadState::Bin,
+    //     };
+    //
+    //     println!("ZxMachine: carga completada -> {:?}", self.load_state);
+    // }
 
     pub fn load_from_dialog(&mut self) -> Result<(), String> {
         let kind = load::load_file_dialog(&mut self.cpu, &mut self.run_state)?;
@@ -259,6 +303,95 @@ impl ZxMachine {
         };
 
         println!("ZxMachine: cargado {:?}", self.load_state);
+    }
+
+    pub fn reset_machine(&mut self) {
+        // ======================
+        // CPU
+        // ======================
+        self.cpu.reg.pc = 0x0000;
+        self.cpu.reg.sp = 0xFFFF;
+
+        // ======================
+        // Estado de ejecución
+        // ======================
+        self.run_state = CpuRunState::new();
+        self.run_state.halted = false;
+        self.run_state.allow_interrupts = true;
+
+        // ======================
+        // Interrupciones
+        // ======================
+        self.interrupt_pending = false;
+        self.interrupt_ctrl = InterruptController::new();
+
+        // ======================
+        // Debug / tracking
+        // ======================
+        self.last_snapshot = None;
+        self.executed_instrs.clear();
+        //self.unimpl_tracker.clear();
+        //self.stack_tracker.clear();
+
+        // ======================
+        // Debugger
+        // ======================
+        self.debugger.pause();
+
+        // ======================
+        // Video
+        // ======================
+        //self.video.reset_timing();
+
+        println!("ZxMachine: reset completo");
+    }
+    pub fn power_reset_machine(&mut self) {
+        // RESET normal
+        self.reset_machine();
+
+        // ======================
+        // RAM (solo RAM real)
+        // ======================
+        //self.bus.clear_ram_48k();
+        self.cpu.bus.clear_mem_slice(0x4000, 0xFFFF);
+        // ======================
+        // Trackers
+        // ======================
+        self.unimpl_tracker = UnimplTracker::new();
+        self.stack_tracker = StackTracker::new(self.stack_tracker.max_events);
+
+        // ======================
+        // Video
+        // ======================
+        self.video.flash_counter = 0;
+        self.video.flash_phase = false;
+
+        println!("ZxMachine: POWER RESET");
+    }
+
+    // Carga la ROM desde un fichero
+    pub fn load_rom(&mut self, path: &Path) -> Result<(), String> {
+        let data = std::fs::read(path)
+            .map_err(|e| format!("ROM: {}", e))?;
+
+        if data.len() != 16 * 1024 {
+            return Err("La ROM debe ser de 16 KB".into());
+        }
+        // ⬇️ CARGAR EN EL BUS DE LA CPU
+        for (i, b) in data.iter().enumerate() {
+            self.cpu.bus.write_byte(i as u16, *b);
+        }
+
+        //self.bus.rom.copy_from_slice(&data);
+
+        // PROTEGER ROM
+        self.cpu.bus.set_romspace(0x0000, 0x3FFF);
+        //self.bus.rom_enabled = true;
+
+        self.cpu.reg.pc = 0x0000;
+        self.cpu.reg.sp = 0xFFFF;
+
+        Ok(())
     }
 }
 

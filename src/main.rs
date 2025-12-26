@@ -33,9 +33,6 @@ pub enum LoadState {
 }
 
 fn main() -> Result<(), String> {
-    //let mut load_state = LoadState::None;
-    //let mut debug_enabled = false;
-
     let mut machine = ZxMachine::new(ESCALA_VENTANA_ZX);
 
     // SDL
@@ -95,20 +92,6 @@ fn main() -> Result<(), String> {
                         if b.contains(x, y) {
                             match b.action {
                                 ButtonAction::Step => {
-                                    // let snap = step(
-                                    //     &mut machine.cpu,
-                                    //     &mut machine.bus,
-                                    //     &mut machine.run_state,
-                                    //     machine.interrupt_pending,
-                                    //     &mut machine.executed_instrs,
-                                    //     &mut machine.unimpl_tracker,
-                                    //     &mut machine.stack_tracker,
-                                    //     true,
-                                    // );
-                                    // if machine.debug_enabled {
-                                    //     machine.last_snapshot = Some(snap);
-                                    // }
-
                                     machine.step_once();
                                 }
 
@@ -116,16 +99,10 @@ fn main() -> Result<(), String> {
                                 ButtonAction::RunFast => machine.debugger.run_fast(),
                                 ButtonAction::Pause => machine.debugger.pause(),
 
-                                ButtonAction::Load => {
-                                    // match load::load_file_dialog(&mut machine.cpu, &mut machine.run_state) {
-                                    //     Ok(kind) => {
-                                    //         machine.load_file(kind);
-                                    //     }
-                                    //     Err(e) => {
-                                    //         println!("Carga cancelada o error: {}", e);
-                                    //     }
-                                    // }
+                                ButtonAction::Reset => machine.reset_machine(),
+                                ButtonAction::HwReset => machine.power_reset_machine(),
 
+                                ButtonAction::Load => {
                                     if let Err(e) = machine.load_from_dialog() {
                                         println!("Carga cancelada o error: {}", e);
                                     }
@@ -142,7 +119,7 @@ fn main() -> Result<(), String> {
                                         "DEBUG {}",
                                         if machine.debug_enabled { "ON" } else { "OFF" });
                                 }
-                                _ => {}
+                                //_ => {}
                             }
                         }
                     }
@@ -168,6 +145,10 @@ fn main() -> Result<(), String> {
         if elapsed < frame_duration {
             std::thread::sleep(frame_duration - elapsed);
         }
+        // Experimento
+        //let kk = Duration::from_micros(200000);
+        //std::thread::sleep(kk);
+        // Fin Experimento
     }
 
     Ok(())

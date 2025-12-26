@@ -21,6 +21,12 @@ impl Video {
         }
     }
 
+    /// 🔁 Reset del estado temporal del vídeo (FLASH, etc.)
+    pub fn reset_timing(&mut self) {
+        self.flash_counter = 0;
+        self.flash_phase = false;
+    }
+    
     /// Actualiza el framebuffer combinando píxeles y atributos
     pub fn update_from_bus(&mut self, bus: &Bus) {
         for y in 0..192 {

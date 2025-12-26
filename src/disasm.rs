@@ -399,66 +399,6 @@ fn decode_ed(mem: &[u8], index: usize) -> (String, u8) {
     }
 }
 
-/*fn decode_fd(mem: &[u8], index: usize) -> (String, u8) {
-    if index + 1 >= mem.len() {
-        return ("FD <incompleto>".to_string(), 1);
-    }
-
-    let b1 = mem[index + 1];
-    let regs = ["B", "C", "D", "E", "H", "L", "(HL)", "A"];
-
-    match b1 {
-        /* LD IY,nn */
-        0x21 => {
-            if index + 3 >= mem.len() {
-                return ("LD IY,<incompleto>".to_string(), 2);
-            }
-            let lo = mem[index + 2] as u16;
-            let hi = mem[index + 3] as u16;
-            (format!("LD IY,0x{:04X}", (hi << 8) | lo), 4)
-        }
-
-        /* DEC (IY+d) */
-        0x35 => {
-            if index + 2 >= mem.len() {
-                return ("DEC (IY+d) <incompleto>".to_string(), 2);
-            }
-            let d = mem[index + 2];
-            (format!("DEC (IY+0x{:02X})", d), 3)
-        }
-
-        /* FD CB d xx : BIT / RES / SET */
-        0xCB => {
-            if index + 3 >= mem.len() {
-                return ("FD CB <incompleto>".to_string(), 2);
-            }
-
-            let d = mem[index + 2];
-            let op = mem[index + 3];
-            let bit = (op >> 3) & 7;
-
-            match op >> 6 {
-                0b01 => (format!("BIT {},(IY+0x{:02X})", bit, d), 4),
-                0b10 => (format!("RES {},(IY+0x{:02X})", bit, d), 4),
-                0b11 => (format!("SET {},(IY+0x{:02X})", bit, d), 4),
-                _ => (format!("DB 0xFD,0xCB,0x{:02X},0x{:02X}", d, op), 4),
-            }
-        }
-
-        /* LD (IY+d),r */
-        0x70..=0x77 => {
-            if index + 2 >= mem.len() {
-                return ("LD (IY+d),r <incompleto>".to_string(), 2);
-            }
-            let d = mem[index + 2];
-            let r = b1 & 7;
-            (format!("LD (IY+0x{:02X}),{}", d, regs[r as usize]), 3)
-        }
-
-        _ => (format!("DB 0xFD,0x{:02X}", b1), 2),
-    }
-}*/
-
 fn decode_fd(mem: &[u8], index: usize) -> (String, u8) {
     if index + 1 >= mem.len() {
         return ("FD <incompleto>".to_string(), 1);

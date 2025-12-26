@@ -2,7 +2,7 @@ use std::collections::VecDeque;
 
 pub struct StackTracker {
     writes: VecDeque<StackWrite>,
-    max_events: usize,
+    pub(crate) max_events: usize,
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -28,7 +28,9 @@ impl StackTracker {
             max_events,
         }
     }
-
+    pub fn clear(&mut self) {
+        self.writes.clear();
+    }
     pub fn record(&mut self, addr: u16, kind: StackWriteKind, pc: u16) {
         if self.writes.len() >= self.max_events {
             self.writes.pop_front();
